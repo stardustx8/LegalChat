@@ -32,13 +32,16 @@ jobs:
         with:
           creds: ${{ secrets.AZURE_CREDENTIALS }}
 
-      - name: 'Install dependencies using pip'
+      - name: 'Install dependencies and create deployment package'
         shell: bash
         run: |
           pip install -r $AZURE_FUNCTIONAPP_PACKAGE_PATH/requirements.txt --target=$AZURE_FUNCTIONAPP_PACKAGE_PATH/.python_packages/lib/site-packages
+          pushd $AZURE_FUNCTIONAPP_PACKAGE_PATH
+          zip -r ../function.zip .
+          popd
 
       - name: 'Deploy to Azure Functions'
         uses: azure/functions-action@v1
         with:
           app-name: ${{ env.AZURE_FUNCTIONAPP_NAME }}
-          package: ${{ env.AZURE_FUNCTIONAPP_PACKAGE_PATH }}
+          package: './function.zip'
