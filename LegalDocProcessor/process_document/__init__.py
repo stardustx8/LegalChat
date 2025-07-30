@@ -16,9 +16,11 @@ def main(myblob: func.InputStream):
     logging.info(f"Size: {myblob.length} Bytes")
 
     # Extract ISO code from filename
-    match = re.match(r"documents/([A-Z]{2})\.docx", myblob.name)
+    # myblob.name is in the format 'container/filename.ext'
+    filename = myblob.name.split('/')[-1]
+    match = re.match(r"([A-Z]{2})\.docx", filename)
     if not match:
-        logging.error(f"Invalid filename format: {myblob.name}. Expected 'documents/XX.docx' where XX is a 2-letter ISO code.")
+        logging.error(f"Invalid filename format: {filename}. Expected 'XX.docx' where XX is a 2-letter ISO code.")
         return
     iso_code = match.group(1)
     logging.info(f"Processing document for ISO code: {iso_code}")
