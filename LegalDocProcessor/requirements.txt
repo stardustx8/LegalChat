@@ -1,0 +1,6 @@
+azure-functions
+azure-search-documents==11.4.0
+azure-storage-blob
+openai>=1.13.3
+python-docx
+python-dotenv
