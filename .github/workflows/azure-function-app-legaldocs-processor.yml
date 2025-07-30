@@ -32,10 +32,13 @@ jobs:
         with:
           creds: ${{ secrets.AZURE_CREDENTIALS }}
 
-      - name: 'Install dependencies and create deployment package'
+      - name: 'Build dependencies in container'
+        run: |
+          docker run --rm -v "${{ github.workspace }}:/src" mcr.microsoft.com/azure-functions/python:4-python3.9-appservice /bin/bash -c "pip install -r /src/$AZURE_FUNCTIONAPP_PACKAGE_PATH/requirements.txt --target=/src/$AZURE_FUNCTIONAPP_PACKAGE_PATH/.python_packages/lib/site-packages"
+
+      - name: 'Create deployment package'
         shell: bash
         run: |
-          pip install -r $AZURE_FUNCTIONAPP_PACKAGE_PATH/requirements.txt --target=$AZURE_FUNCTIONAPP_PACKAGE_PATH/.python_packages/lib/site-packages
           pushd $AZURE_FUNCTIONAPP_PACKAGE_PATH
           zip -r ../function.zip .
           popd
