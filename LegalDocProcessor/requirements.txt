@@ -4,3 +4,4 @@ azure-storage-blob
 openai>=1.13.3
 python-docx
 python-dotenv
+langchain
