@@ -6,7 +6,7 @@
       "type": "blobTrigger",
       "direction": "in",
       "path": "legaldocsrag/{name}",
-      "connection": "KNIFE_STORAGE_CONNECTION_STRING"
+      "connection": "AzureWebJobsStorage"
     }
   ]
 }
