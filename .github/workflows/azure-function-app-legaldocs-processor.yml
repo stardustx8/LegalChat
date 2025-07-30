@@ -1,33 +1,44 @@
-name: Deploy legaldocs-processor Function App
+# Docs for the Azure Web Apps Deploy action: https://github.com/Azure/webapps-deploy
+# More GitHub Actions for Azure: https://github.com/Azure/actions
+
+name: Build and deploy Python project to Azure Function App - legaldocs-processor
 
 on:
   push:
     branches:
       - main
-    paths:
-      - 'LegalDocProcessor/**'
   workflow_dispatch:
 
 jobs:
   build-and-deploy:
     runs-on: ubuntu-latest
+    environment: production
+    env:
+      AZURE_FUNCTIONAPP_NAME: legaldocs-processor
+      AZURE_FUNCTIONAPP_PACKAGE_PATH: 'LegalDocProcessor'
+      PYTHON_VERSION: '3.9'
+
     steps:
       - name: 'Checkout GitHub Action'
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
 
-      - name: Setup Python
+      - name: 'Setup Python version'
         uses: actions/setup-python@v4
         with:
-          python-version: '3.9'
+          python-version: ${{ env.PYTHON_VERSION }}
 
       - name: 'Login via Azure CLI'
         uses: azure/login@v1
         with:
           creds: ${{ secrets.AZURE_CREDENTIALS }}
 
-      - name: 'Run Azure Functions Action'
-        uses: Azure/functions-action@v1
-        id: fa
+      - name: 'Install dependencies using pip'
+        shell: bash
+        run: |
+          pip install -r $AZURE_FUNCTIONAPP_PACKAGE_PATH/requirements.txt --target=$AZURE_FUNCTIONAPP_PACKAGE_PATH/.python_packages/lib/site-packages
+
+      - name: 'Deploy to Azure Functions'
+        uses: azure/functions-action@v1
         with:
-          app-name: 'legaldocs-processor'
-          package: './LegalDocProcessor'
+          app-name: ${{ env.AZURE_FUNCTIONAPP_NAME }}
+          package: ${{ env.AZURE_FUNCTIONAPP_PACKAGE_PATH }}
