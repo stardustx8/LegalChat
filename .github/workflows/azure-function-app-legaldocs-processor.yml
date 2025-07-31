@@ -32,7 +32,7 @@ jobs:
         with:
           creds: ${{ secrets.AZURE_CREDENTIALS }}
 
-      - name: Install dependencies in container with lxml support
+      - name: Install dependencies in container
         run: |
           docker run --rm \
             -v ${{ github.workspace }}/LegalDocProcessor:/workspace \
@@ -42,7 +42,7 @@ jobs:
               cd /workspace && \
               apt-get update && \
               apt-get install -y libxml2-dev libxslt-dev && \
-              pip install --no-input --progress-bar off --no-cache-dir lxml==4.9.3 && \
+              pip install --no-input --progress-bar off --upgrade pip && \
               pip install --no-input --progress-bar off -r requirements.txt -t .python_packages/lib/site-packages
             "
 
