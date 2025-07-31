@@ -110,10 +110,9 @@ def main(myblob: func.InputStream):
             
             doc = {
                 "id": f"{iso_code}-{i}",
-                "content": chunk,
+                "chunk": chunk,
                 "embedding": embedding,
-                "iso_code": iso_code,
-                "source_file": f"{iso_code}.docx"
+                "iso_code": iso_code
             }
             docs_to_upload.append(doc)
 
