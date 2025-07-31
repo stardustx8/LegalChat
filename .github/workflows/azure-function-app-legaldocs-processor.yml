@@ -32,9 +32,19 @@ jobs:
         with:
           creds: ${{ secrets.AZURE_CREDENTIALS }}
 
-      - name: 'Build dependencies in container'
+      - name: Install dependencies in container with lxml support
         run: |
-          docker run --rm --entrypoint /bin/bash -v "${{ github.workspace }}:/src" mcr.microsoft.com/azure-functions/python:4-python3.9-appservice -c "pip install --no-input --progress-bar off -r /src/$AZURE_FUNCTIONAPP_PACKAGE_PATH/requirements.txt --target=/src/$AZURE_FUNCTIONAPP_PACKAGE_PATH/.python_packages/lib/site-packages"
+          docker run --rm \
+            -v ${{ github.workspace }}/LegalDocProcessor:/workspace \
+            --entrypoint /bin/bash \
+            mcr.microsoft.com/azure-functions/python:4-python3.9-appservice \
+            -c "
+              cd /workspace && \
+              apt-get update && \
+              apt-get install -y libxml2-dev libxslt-dev && \
+              pip install --no-input --progress-bar off --no-cache-dir lxml==4.9.3 && \
+              pip install --no-input --progress-bar off -r requirements.txt -t .python_packages/lib/site-packages
+            "
 
       - name: 'Create deployment package'
         shell: bash
