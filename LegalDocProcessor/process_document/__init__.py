@@ -48,14 +48,6 @@ def main(myblob: func.InputStream):
         return
     
     try:
-        logging.info("Testing import: langchain")
-        from langchain.text_splitter import RecursiveCharacterTextSplitter
-        logging.info("✅ langchain imported successfully")
-    except Exception as e:
-        logging.error(f"❌ Failed to import langchain: {e}")
-        return
-    
-    try:
         logging.info("Testing import: azure.search.documents")
         from azure.search.documents import SearchClient
         from azure.core.credentials import AzureKeyCredential
