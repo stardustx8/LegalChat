@@ -33,10 +33,21 @@ def main(myblob: func.InputStream):
     # Azure OpenAI settings
     openai_endpoint = os.environ.get("KNIFE_OPENAI_ENDPOINT")
     openai_key = os.environ.get("KNIFE_OPENAI_KEY")
-    openai_embedding_deployment = os.environ.get("OPENAI_EMBED_DEPLOY")
+    openai_embedding_deployment = os.environ.get("KNIFE_OPENAI_DEPLOY")
 
-    if not all([search_endpoint, search_key, search_index_name, openai_endpoint, openai_key, openai_embedding_deployment]):
-        logging.error("Missing one or more required environment variables.")
+    # Detailed check for environment variables
+    env_vars = {
+        "KNIFE_SEARCH_ENDPOINT": search_endpoint,
+        "KNIFE_SEARCH_KEY": search_key,
+        "KNIFE_SEARCH_INDEX": search_index_name,
+        "KNIFE_OPENAI_ENDPOINT": openai_endpoint,
+        "KNIFE_OPENAI_KEY": openai_key,
+        "KNIFE_OPENAI_DEPLOY": openai_embedding_deployment
+    }
+
+    missing_vars = [key for key, value in env_vars.items() if not value]
+    if missing_vars:
+        logging.error(f"Missing required environment variables: {', '.join(missing_vars)}")
         return
 
     # Initialize OpenAI client
