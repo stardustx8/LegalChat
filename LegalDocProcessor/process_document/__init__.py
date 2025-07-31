@@ -32,19 +32,11 @@ def main(myblob: func.InputStream):
         return
     
     try:
-        logging.info("Testing import: docx")
-        import docx
-        logging.info("✅ docx imported successfully")
+        logging.info("Testing import: docx2txt")
+        import docx2txt
+        logging.info("✅ docx2txt imported successfully")
     except Exception as e:
-        logging.error(f"❌ Failed to import docx: {e}")
-        return
-    
-    try:
-        logging.info("Testing import: lxml")
-        import lxml
-        logging.info("✅ lxml imported successfully")
-    except Exception as e:
-        logging.error(f"❌ Failed to import lxml: {e}")
+        logging.error(f"❌ Failed to import docx2txt: {e}")
         return
     
     try:
