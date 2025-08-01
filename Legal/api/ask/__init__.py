@@ -1,7 +1,6 @@
 import logging
 import os, json, requests, re
 import azure.functions as func
-from openai import AzureOpenAI
 
 # --- Prompts and Helper Functions ---
 # Note: Environment variables are loaded within the main() function to prevent module-level errors.
@@ -57,25 +56,49 @@ FORMATTING RULES
 •  If nothing is found, return `[]`.
 """
 
-def embed(text: str, client: AzureOpenAI, deploy_embed: str) -> list[float]:
-    """Generates embeddings for a given text using a specific deployment."""
-    return client.embeddings.create(
-        input=[text],
-        model=deploy_embed
-    ).data[0].embedding
+def embed(text: str, openai_endpoint: str, openai_key: str, deploy_embed: str) -> list[float]:
+    """Generates embeddings for a given text using direct REST API calls."""
+    headers = {
+        "Content-Type": "application/json",
+        "api-key": openai_key
+    }
+    
+    url = f"{openai_endpoint}/openai/deployments/{deploy_embed}/embeddings?api-version=2023-05-15"
+    
+    payload = {
+        "input": text
+    }
+    
+    response = requests.post(url, headers=headers, json=payload)
+    response.raise_for_status()
+    
+    embedding_data = response.json()
+    return embedding_data['data'][0]['embedding']
 
-def extract_iso_codes(text: str, client: AzureOpenAI, deploy_chat: str) -> list[str]:
-    """Extracts ISO-3166-1 alpha-2 country codes from text using an LLM call."""
+def extract_iso_codes(text: str, openai_endpoint: str, openai_key: str, deploy_chat: str) -> list[str]:
+    """Extracts ISO-3166-1 alpha-2 country codes from text using direct REST API calls."""
     try:
-        response = client.chat.completions.create(
-            model=deploy_chat,
-            messages=[
+        headers = {
+            "Content-Type": "application/json",
+            "api-key": openai_key
+        }
+        
+        url = f"{openai_endpoint}/openai/deployments/{deploy_chat}/chat/completions?api-version=2023-05-15"
+        
+        payload = {
+            "messages": [
                 {"role": "system", "content": COUNTRY_DETECTION_PROMPT},
                 {"role": "user", "content": text}
             ],
-            temperature=0.0,
-        )
-        raw_content = response.choices[0].message.content.strip()
+            "temperature": 0.0,
+            "max_tokens": 1000
+        }
+        
+        response = requests.post(url, headers=headers, json=payload)
+        response.raise_for_status()
+        
+        response_data = response.json()
+        raw_content = response_data['choices'][0]['message']['content'].strip()
         cleaned_content = re.sub(r'^```json\s*|\s*```$', '', raw_content)
         data = json.loads(cleaned_content)
         if not isinstance(data, list):
@@ -95,12 +118,12 @@ def extract_iso_codes(text: str, client: AzureOpenAI, deploy_chat: str) -> list[
         logging.error(f"Error parsing country detection response: {e}")
         return []
 
-def retrieve(query: str, iso_codes: list[str], client: AzureOpenAI, config: dict, k: int = 5) -> list[dict]:
+def retrieve(query: str, iso_codes: list[str], config: dict, k: int = 5) -> list[dict]:
     """Retrieves documents from Azure Cognitive Search based on a vector query and filters."""
     if not iso_codes:
         return []
     
-    vec = embed(query, client, config['deploy_embed'])
+    vec = embed(query, config['openai_endpoint'], config['openai_key'], config['deploy_embed'])
     
     search_url = f"{config['search_endpoint']}/indexes/{config['index_name']}/docs/search?api-version=2023-11-01"
     headers = {'Content-Type': 'application/json', 'api-key': config['search_key']}
@@ -183,14 +206,14 @@ GRADER_REFINER_PROMPT = """
 }
 """
 
-def chat(question: str, client: AzureOpenAI, config: dict) -> str:
+def chat(question: str, config: dict) -> str:
     """Orchestrates the RAG pipeline to answer a question."""
-    iso_codes = extract_iso_codes(question, client, config['deploy_chat'])
+    iso_codes = extract_iso_codes(question, config['openai_endpoint'], config['openai_key'], config['deploy_chat'])
     if not iso_codes:
         return "Could not determine a country from your query. Please be more specific."
 
     logging.info(f"Detected countries: {', '.join(iso_codes)}")
-    chunks = retrieve(question, iso_codes, client, config, k=5)
+    chunks = retrieve(question, iso_codes, config, k=5)
 
     if not chunks:
         # Even if no docs are found, we can still show the header with availability status
@@ -297,15 +320,28 @@ def chat(question: str, client: AzureOpenAI, config: dict) -> str:
     
     # --- Step 1: Draft Answer ---
     logging.info("Generating draft answer...")
-    draft_resp = client.chat.completions.create(
-        model=config['deploy_chat'],
-        messages=[
+    
+    headers = {
+        "Content-Type": "application/json",
+        "api-key": config['openai_key']
+    }
+    
+    url = f"{config['openai_endpoint']}/openai/deployments/{config['deploy_chat']}/chat/completions?api-version=2023-05-15"
+    
+    payload = {
+        "messages": [
             {"role": "system", "content": drafter_system_message},
             {"role": "user", "content": f"Context:\n{context}\n\nQuestion: {question}"}
         ],
-        temperature=0.0, # Keep draft deterministic
-    )
-    draft_answer = draft_resp.choices[0].message.content.strip()
+        "temperature": 0.0,
+        "max_tokens": 4000
+    }
+    
+    draft_resp = requests.post(url, headers=headers, json=payload)
+    draft_resp.raise_for_status()
+    
+    draft_response_data = draft_resp.json()
+    draft_answer = draft_response_data['choices'][0]['message']['content'].strip()
     logging.info("Draft answer generated.")
 
     # Build the dynamic markdown table header
@@ -319,17 +355,21 @@ def chat(question: str, client: AzureOpenAI, config: dict) -> str:
     logging.info("Grading and refining answer...")
     refiner_user_message = f"""CONTEXT:\n{context}\n\nQUESTION: {question}\n\nDRAFT_ANSWER:\n{draft_with_header}"""
 
-    refine_resp = client.chat.completions.create(
-        model=config['deploy_chat'], # Use the best model for this complex task
-        response_format={"type": "json_object"},
-        messages=[
+    payload = {
+        "messages": [
             {"role": "system", "content": GRADER_REFINER_PROMPT},
             {"role": "user", "content": refiner_user_message}
         ],
-        temperature=0.0,
-    )
+        "temperature": 0.0,
+        "max_tokens": 4000,
+        "response_format": {"type": "json_object"}
+    }
     
-    refined_output_json = refine_resp.choices[0].message.content.strip()
+    refine_resp = requests.post(url, headers=headers, json=payload)
+    refine_resp.raise_for_status()
+    
+    refine_response_data = refine_resp.json()
+    refined_output_json = refine_response_data['choices'][0]['message']['content'].strip()
     logging.info("Refined answer generated.")
 
     # For debugging, we return the full JSON. In production, you might extract just the 'refined_answer'.
@@ -395,15 +435,8 @@ def main(req: func.HttpRequest) -> func.HttpResponse:
                 status_code=400
             )
 
-        # Initialize the Azure OpenAI client
-        client = AzureOpenAI(
-            azure_endpoint=config['openai_endpoint'],
-            api_key=config['openai_key'],
-            api_version=config['api_version'],
-        )
-
-        # Execute the RAG pipeline
-        answer = chat(question, client, config)
+        # Execute the RAG pipeline using REST API calls
+        answer = chat(question, config)
 
         # Return the response
         # The 'chat' function now returns a JSON string, so we set the mimetype accordingly
