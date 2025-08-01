@@ -180,7 +180,9 @@ def build_response_header(iso_codes: list[str], found_iso_codes: set[str]) -> st
     # Combine the main header and the table
     return f"{main_header}\n\n{table}\n\n---\n\n"
 
-# GRADER_REFINER_PROMPT = """create a draft answer to the users question according to the context provided"""
+GRADER_REFINER_PROMPT = """
+create a draft answer to the users question according to the context provided
+"""
 
 def chat(question: str, client: AzureOpenAI, config: dict) -> str:
     """Orchestrates the RAG pipeline to answer a question."""
@@ -198,37 +200,67 @@ def chat(question: str, client: AzureOpenAI, config: dict) -> str:
         no_docs_message = f"No documents found for the specified countries: {', '.join(iso_codes)}. Please try another query or check if the relevant legislation is available."
         return header + no_docs_message
 
-    # MINIMAL TEST: Try just the drafting step without refining
-    logging.info("DEBUG: Testing minimal drafting step...")
+    drafter_system_message = """
+refine the draft answer to the users question according to the context provided
+    """
+    context = "\n\n---\n\n".join([c['content'] for c in chunks])
     
+    # --- Step 1: Draft Answer ---
+    logging.info("Generating draft answer...")
+    draft_resp = client.chat.completions.create(
+        model=config['deploy_chat'],
+        messages=[
+            {"role": "system", "content": drafter_system_message},
+            {"role": "user", "content": f"Context:\n{context}\n\nQuestion: {question}"}
+        ],
+        temperature=0.0, # Keep draft deterministic
+    )
+    draft_answer = draft_resp.choices[0].message.content.strip()
+    logging.info("Draft answer generated.")
+
     # Build the dynamic markdown table header
     found_iso_codes = {chunk['iso_code'] for chunk in chunks}
     header = build_response_header(iso_codes, found_iso_codes)
     
+    # Prepend header to the draft answer before sending to refiner
+    draft_with_header = header + draft_answer
+
+    # --- Step 2: Grade and Refine Answer ---
+    logging.info("Grading and refining answer...")
+    refiner_user_message = f"""CONTEXT:\n{context}\n\nQUESTION: {question}\n\nDRAFT_ANSWER:\n{draft_with_header}"""
+
+    refine_resp = client.chat.completions.create(
+        model=config['deploy_chat'], # Use the best model for this complex task
+        response_format={"type": "json_object"},
+        messages=[
+            {"role": "system", "content": GRADER_REFINER_PROMPT},
+            {"role": "user", "content": refiner_user_message}
+        ],
+        temperature=0.0,
+    )
+    
+    refined_output_json = refine_resp.choices[0].message.content.strip()
+    logging.info("Refined answer generated.")
+
+    # For debugging, we return the full JSON. In production, you might extract just the 'refined_answer'.
+    # We add the header to the final refined answer text before packaging it up.
     try:
-        # Test 1: Simple drafting with minimal context
-        logging.info("DEBUG: Testing simple draft with first chunk only...")
-        first_chunk = chunks[0]['chunk'][:500] if chunks else "No content"
-        
-        draft_resp = client.chat.completions.create(
-            model=config['deploy_chat'],
-            messages=[
-                {"role": "system", "content": "You are a helpful legal assistant."},
-                {"role": "user", "content": f"Based on this German knife law excerpt: {first_chunk}\n\nAnswer: {question}"}
-            ],
-            temperature=0.0,
-            max_tokens=500
-        )
-        draft_answer = draft_resp.choices[0].message.content.strip()
-        logging.info("DEBUG: Simple draft successful")
-        
-        # Return simple result without JSON parsing
-        simple_result = f"Draft Answer Test Successful!\n\n{draft_answer}"
-        return json.dumps({"answer": header + simple_result})
-        
-    except Exception as draft_error:
-        logging.error(f"DEBUG: Draft step failed: {draft_error}")
-        return json.dumps({"error": f"Draft step failed: {str(draft_error)}"})
+        refined_data = json.loads(refined_output_json)
+        answer = refined_data.get('refined_answer', '')
+    except json.JSONDecodeError:
+        logging.error("Failed to decode JSON from refiner model.")
+        # Fallback to the draft answer if the refiner fails
+        refined_data = {
+            "evaluation": {"error": "Refiner output was not valid JSON.", "raw_output": refined_output_json},
+            "refined_answer": draft_answer 
+        }
+        answer = draft_answer
+
+    # For debugging, return the entire object as a JSON string.
+    # The 'answer' variable already contains the 'refined_answer' text.
+    refined_data['refined_answer'] = answer
+    refined_data['country_header'] = header  # Add the header to the response object
+    return json.dumps(refined_data, indent=2)
 
 # --- Azure Function Main Entry Point ---
 def main(req: func.HttpRequest) -> func.HttpResponse:
