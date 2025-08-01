@@ -1,0 +1,312 @@
+import logging
+import os, json, requests, re
+import azure.functions as func
+from openai import AzureOpenAI
+
+# --- Prompts and Helper Functions ---
+# Note: Environment variables are loaded within the main() function to prevent module-level errors.
+
+COUNTRY_DETECTION_PROMPT = """
+ROLE
+You are a specialized assistant whose sole task is to extract country references from user text.
+
+SCOPE OF EXTRACTION
+Return **every** genuine country reference that can be inferred, using the rules below:
+
+1.  ISO 3166-1 ALPHA-2 CODES
+    •  Detect any two-letter, UPPER-CASE sequence in the input text that is a valid ISO 3166-1 alpha-2 country code (e.g., CH, US, CN, DE).
+    •  Crucially, ignore common short words (typically 2-3 letters), especially if lowercase, that might incidentally resemble country codes OR that you might mistakenly associate with a country. This includes articles, prepositions, pronouns, and other grammatical particles in any language (e.g., English "in", "on", "it", "is", "at", "to", "do", "am", "pm", "id", "tv", "an", "of", "or"; German "ich", "er", "sie", "es", "der", "die", "das", "ein", "mit", "auf", "in", "zu", "so", "ob"). Such words should ONLY be considered if they are unambiguously used as a direct country reference AND appear in uppercase as a specific ISO code.
+    •  Context must strongly support that the sequence is a country indicator, not an accidental substring or a common word.
+
+2.  COUNTRY NAMES (any language)
+    •  Official and common names, case-insensitive: "Switzerland", "switzerland".
+    •  Major international variants: "Deutschland", "Schweiz", "Suiza", "Éire", …
+    •  Adjectival forms that clearly point to a country: "Swiss law", "German regulations".
+
+3.  TRANSNATIONAL ENTITIES, GEOPOLITICAL GROUPINGS & WELL-KNOWN NICKNAMES
+    Your goal is to identify entities that represent a group of countries.
+    - For the explicitly listed examples below, you MUST expand them to ALL their constituent ISO codes as specified. For each constituent country, create a separate JSON entry using the original detected entity/nickname as the "detected_phrase".
+        - "EuroAirport" (also "Basel-Mulhouse-Freiburg"): output CH, FR
+        - "Benelux": output BE, NL, LU
+        - "The Nordics" (context-dependent): output DK, NO, SE, FI, IS
+        - "Iberian Peninsula" (also "Iberische Halbinsel"): output ES, PT
+        - "Baltics" (also "Baltische Staaten"): output EE, LV, LT
+        - "Scandinavia" (also "Skandinavien"): output DK, NO, SE
+
+    •  When such an entity is processed, output *all* its known constituent countries.
+    •  Do **not** substitute "EU" (the European Union itself is not a country for this purpose, though its member states are if individually referenced).
+
+4.  CONTEXTUAL RULES
+    •  Prepositions or articles ("in Switzerland") never block detection of the country name itself.
+    •  Mixed lists are fine: "switzerland, Deutschland & CN".
+    •  Ambiguous or purely figurative uses → **skip**. Err on the side of precision. Only extract if you are highly confident it's a geographical reference.
+
+FORMATTING RULES
+•  Output a JSON array exactly in this form:
+
+    ```json
+    [
+      {"detected_phrase": "<exact text>", "code": "XX"},
+      …
+    ]
+    ```
+
+•  Preserve the original casing from the input text in "detected_phrase".
+•  If nothing is found, return `[]`.
+"""
+
+# Generates embeddings for a given text using a specific deployment.
+def embed(text: str, client: AzureOpenAI, deploy_embed: str):
+    response = client.embeddings.create(input=text, model=deploy_embed)
+    return response.data[0].embedding
+
+# Extracts ISO-3166-1 alpha-2 country codes from text using an LLM call.
+def extract_iso_codes(text: str, client: AzureOpenAI, deploy_chat: str):
+    response = client.chat.completions.create(
+        model=deploy_chat,
+        response_format={"type": "json_object"},
+        messages=[
+            {"role": "system", "content": COUNTRY_DETECTION_PROMPT},
+            {"role": "user", "content": f"Extract country references from this text: {text}"}
+        ],
+        temperature=0.0,
+    )
+    
+    try:
+        countries_json = response.choices[0].message.content.strip()
+        countries = json.loads(countries_json)
+        iso_codes = [country['code'] for country in countries if 'code' in country]
+        logging.info(f"Extracted ISO codes: {iso_codes}")
+        return iso_codes
+    except (json.JSONDecodeError, KeyError) as e:
+        logging.error(f"Failed to parse country extraction response: {e}")
+        return []
+
+# Retrieves documents from Azure Cognitive Search based on a vector query and filters.
+def retrieve(query: str, iso_codes: list[str], client: AzureOpenAI, config: dict, k: int = 5):
+    from azure.search.documents import SearchClient
+    from azure.core.credentials import AzureKeyCredential
+    
+    # Generate embedding for the query
+    query_embedding = embed(query, client, config['deploy_embed'])
+    
+    # Initialize search client
+    search_credential = AzureKeyCredential(config['search_key'])
+    search_client = SearchClient(
+        endpoint=config['search_endpoint'], 
+        index_name=config['index_name'], 
+        credential=search_credential
+    )
+    
+    # Build filter for ISO codes
+    if iso_codes:
+        iso_filter = " or ".join([f"iso_code eq '{code}'" for code in iso_codes])
+    else:
+        iso_filter = None
+    
+    # Perform vector search
+    results = search_client.search(
+        search_text="",
+        vector_queries=[{
+            "vector": query_embedding,
+            "k_nearest_neighbors": k,
+            "fields": "embedding"
+        }],
+        filter=iso_filter,
+        select="chunk,iso_code"
+    )
+    
+    return list(results)
+
+# Converts a two-letter ISO country code to a flag emoji.
+def iso_to_flag(iso_code: str):
+    return ''.join(chr(ord(c) + 127397) for c in iso_code.upper())
+
+# Builds a Markdown table header to display detected countries and their availability.
+def build_response_header(iso_codes: list[str], found_iso_codes: set[str]):
+    if not iso_codes:
+        return "**No countries detected in your question.**\n\n"
+    
+    header = "| Country | Status |\n|---------|--------|\n"
+    for iso_code in iso_codes:
+        flag = iso_to_flag(iso_code)
+        status = "✅ Available" if iso_code in found_iso_codes else "❌ No data"
+        header += f"| {flag} {iso_code} | {status} |\n"
+    
+    return header + "\n"
+
+GRADER_REFINER_PROMPT = """
+{
+  "role": "grader_and_refiner_agent",
+  "private_thought_key": "internal_grading_and_refinement_process",
+
+  "goal": "First, critically evaluate a DRAFT_ANSWER against the provided CONTEXT. Second, produce a REFINED_ANSWER that corrects all identified flaws and perfectly adheres to the output format. The final output will contain both the evaluation and the refined answer for debugging.",
+
+  "workflow": [
+    { "step": "extract_salient_facts",
+      "action": "From the CONTEXT, extract all facts, rules, exceptions, and nuances that are relevant to the QUESTION. Pay special attention to jurisdictional differences, age limits, exceptions, and procedural requirements." },
+    
+    { "step": "grade_draft",
+      "action": "Evaluate the DRAFT_ANSWER against the extracted facts. Identify: (1) Factual errors or omissions, (2) Unsupported claims, (3) Missing jurisdictional nuances, (4) Incorrect citations, (5) Formatting issues." },
+    
+    { "step": "refine_answer",
+      "action": "Create a REFINED_ANSWER that: (1) Corrects all identified errors, (2) Includes all relevant facts from CONTEXT, (3) Uses proper citations in format (KL {ISO-code} §section), (4) Addresses jurisdictional differences clearly, (5) Follows the exact output format." },
+    
+    { "step": "finalize_output",
+      "action": "Produce a single JSON object with two keys: 'evaluation' and 'refined_answer'.\\n                 - The 'evaluation' key will contain the full output of the 'grade_draft' step.\\n                 - The 'refined_answer' key will contain ONLY the final, user-facing text of the refined answer." }
+  ],
+
+  "house_rules": {
+    "negative_claims": "A negative assertion (e.g., 'no age limit') must be supported by an explicit passage stating the absence. Otherwise, phrase it as 'The supplied sources do not address...' and give it NO citation.",
+    "citation_format": "(KL {ISO-code} §section)"
+  }
+}
+"""
+
+# Orchestrates the RAG pipeline to answer a question.
+def chat(question: str, client: AzureOpenAI, config: dict):
+    logging.info(f"Processing question: {question}")
+    
+    # Extract ISO codes from the question
+    iso_codes = extract_iso_codes(question, client, config['deploy_chat'])
+    logging.info(f"Detected countries: {iso_codes}")
+    
+    # Retrieve relevant documents
+    documents = retrieve(question, iso_codes, client, config)
+    found_iso_codes = set(doc['iso_code'] for doc in documents)
+    logging.info(f"Found documents from countries: {found_iso_codes}")
+    
+    # Build context from retrieved documents
+    context = "\n\n".join([f"**{doc['iso_code']}**: {doc['chunk']}" for doc in documents])
+    
+    # Generate initial draft answer
+    draft_prompt = f"""Based on the following legal documents, answer this question: {question}
+
+Context:
+{context}
+
+Provide a comprehensive answer with proper citations in the format (KL {{ISO-code}} §section)."""
+
+    draft_resp = client.chat.completions.create(
+        model=config['deploy_chat'],
+        messages=[
+            {"role": "system", "content": "You are a legal assistant. Provide accurate answers based only on the provided context."},
+            {"role": "user", "content": draft_prompt}
+        ],
+        temperature=0.0,
+    )
+    
+    draft_answer = draft_resp.choices[0].message.content.strip()
+    logging.info("Draft answer generated.")
+    
+    # Build country availability header
+    header = build_response_header(iso_codes, found_iso_codes)
+    
+    # Refine the answer using the grader-refiner agent
+    refiner_user_message = f"""QUESTION: {question}
+
+CONTEXT:
+{context}
+
+DRAFT_ANSWER:
+{draft_answer}
+
+Please evaluate and refine this answer according to your instructions."""
+
+    refine_resp = client.chat.completions.create(
+        model=config['deploy_chat'], # Use the best model for this complex task
+        response_format={"type": "json_object"},
+        messages=[
+            {"role": "system", "content": GRADER_REFINER_PROMPT},
+            {"role": "user", "content": refiner_user_message}
+        ],
+        temperature=0.0,
+    )
+    
+    refined_output_json = refine_resp.choices[0].message.content.strip()
+    logging.info("Refined answer generated.")
+
+    # For debugging, we return the full JSON. In production, you might extract just the 'refined_answer'.
+    # We add the header to the final refined answer text before packaging it up.
+    try:
+        refined_data = json.loads(refined_output_json)
+        answer = refined_data.get('refined_answer', '')
+    except json.JSONDecodeError:
+        logging.error("Failed to decode JSON from refiner model.")
+        # Fallback to the draft answer if the refiner fails
+        refined_data = {
+            "evaluation": {"error": "Refiner output was not valid JSON.", "raw_output": refined_output_json},
+            "refined_answer": draft_answer 
+        }
+        answer = draft_answer
+
+    # For debugging, return the entire object as a JSON string.
+    # The 'answer' variable already contains the 'refined_answer' text.
+    refined_data['refined_answer'] = answer
+    refined_data['country_header'] = header  # Add the header to the response object
+    return json.dumps(refined_data, indent=2)
+
+# --- Azure Function Main Entry Point ---
+def main(req: func.HttpRequest) -> func.HttpResponse:
+    logging.info('API function invoked.')
+
+    # 1. Load and validate all required environment variables
+    try:
+        required_vars = {
+            "search_endpoint": "KNIFE_SEARCH_ENDPOINT",
+            "search_key": "KNIFE_SEARCH_KEY",
+            "openai_endpoint": "KNIFE_OPENAI_ENDPOINT",
+            "openai_key": "KNIFE_OPENAI_KEY"
+        }
+        config = {key: os.environ[val] for key, val in required_vars.items()}
+
+        # Add optional vars with defaults
+        config.update({
+            "index_name": os.environ.get("KNIFE_SEARCH_INDEX", "knife-index"),
+            "deploy_chat": os.environ.get("OPENAI_CHAT_DEPLOY", "gpt-4.1"),
+            "deploy_embed": os.environ.get("OPENAI_EMBED_DEPLOY", "text-embedding-3-large"),
+            "api_version": os.environ.get("OPENAI_API_VERSION", "2024-02-15-preview")
+        })
+    except KeyError as e:
+        error_msg = f"Configuration error: Missing required environment variable: {e}"
+        logging.error(error_msg)
+        return func.HttpResponse(error_msg, status_code=500)
+
+    # 2. Process the request and run the RAG pipeline
+    try:
+        question = req.params.get('question')
+        if not question:
+            try:
+                req_body = req.get_json()
+            except ValueError:
+                pass
+            else:
+                question = req_body.get('question')
+
+        if not question:
+            return func.HttpResponse(
+                "Please pass a question on the query string or in the request body, e.g., /api/ask?question=...",
+                status_code=400
+            )
+
+        # Initialize the Azure OpenAI client
+        client = AzureOpenAI(
+            azure_endpoint=config['openai_endpoint'],
+            api_key=config['openai_key'],
+            api_version=config['api_version'],
+        )
+
+        # Execute the RAG pipeline
+        answer = chat(question, client, config)
+
+        # Return the response
+        # The 'chat' function now returns a JSON string, so we set the mimetype accordingly
+        return func.HttpResponse(answer, mimetype="application/json", status_code=200)
+
+    except Exception as e:
+        # Log the full exception traceback for detailed diagnostics
+        logging.error(f"An unexpected error occurred: {e}", exc_info=True)
+        return func.HttpResponse(
+            f"An internal server error occurred. Please check the logs for details. Error ID: {getattr(e, 'error_id', 'N/A')}", 
+            status_code=500
+        )
