@@ -1,7 +1,6 @@
 azure-functions==1.18.0
 azure-search-documents==11.4.0
 azure-storage-blob==12.19.1
-openai==0.28.1
+openai[datalib]==0.28.1
 python-dotenv==1.0.1
 docx2txt==0.8
-numpy==1.24.3
