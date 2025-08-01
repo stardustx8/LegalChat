@@ -111,12 +111,12 @@ def retrieve(query: str, iso_codes: list[str], client: AzureOpenAI, config: dict
             {
                 "kind": "vector",
                 "vector": vec,
-                "fields": "vector",
+                "fields": "embedding",
                 "k": k
             }
         ],
         "filter": filter_str,
-        "select": "content,iso_code,chunk_index"
+        "select": "chunk,iso_code,id"
     }
     
     response = requests.post(search_url, headers=headers, json=payload)
