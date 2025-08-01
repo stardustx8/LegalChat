@@ -293,66 +293,40 @@ def chat(question: str, client: AzureOpenAI, config: dict) -> str:
   ]
 }
     """
-    context = "\n\n---\n\n".join([c['content'] for c in chunks])
+    context = json.dumps(chunks, indent=2)
+    user_prompt = f"CONTEXT:\n{context}\n\nQUESTION:\n{question}\n\nDRAFT_ANSWER:"
     
-    # --- Step 1: Draft Answer ---
-    logging.info("Generating draft answer...")
-    draft_resp = client.chat.completions.create(
+    draft_response = client.chat.completions.create(
         model=config['deploy_chat'],
         messages=[
             {"role": "system", "content": drafter_system_message},
-            {"role": "user", "content": f"Context:\n{context}\n\nQuestion: {question}"}
+            {"role": "user", "content": user_prompt}
         ],
-        temperature=0.0, # Keep draft deterministic
+        temperature=0.0
     )
-    draft_answer = draft_resp.choices[0].message.content.strip()
-    logging.info("Draft answer generated.")
+    draft_answer = draft_response.choices[0].message.content
 
-    # Build the dynamic markdown table header
-    found_iso_codes = {chunk['iso_code'] for chunk in chunks}
-    header = build_response_header(iso_codes, found_iso_codes)
+    # --- Grader/Refiner Agent ---
+    refiner_user_prompt = f"CONTEXT:\n{context}\n\nQUESTION:\n{question}\n\nDRAFT_ANSWER:\n{draft_answer}"
     
-    # Prepend header to the draft answer before sending to refiner
-    draft_with_header = header + draft_answer
-
-    # --- Step 2: Grade and Refine Answer ---
-    logging.info("Grading and refining answer...")
-    refiner_user_message = f"""CONTEXT:\n{context}\n\nQUESTION: {question}\n\nDRAFT_ANSWER:\n{draft_with_header}"""
-
-    refine_resp = client.chat.completions.create(
-        model=config['deploy_chat'], # Use the best model for this complex task
-        response_format={"type": "json_object"},
+    refiner_response = client.chat.completions.create(
+        model=config['deploy_chat'],
         messages=[
             {"role": "system", "content": GRADER_REFINER_PROMPT},
-            {"role": "user", "content": refiner_user_message}
+            {"role": "user", "content": refiner_user_prompt}
         ],
         temperature=0.0,
+        response_format={"type": "json_object"}
     )
     
-    refined_output_json = refine_resp.choices[0].message.content.strip()
-    logging.info("Refined answer generated.")
+    final_output = json.loads(refiner_response.choices[0].message.content)
+    refined_answer = final_output.get("refined_answer", "Error: Could not refine the answer.")
+    
+    # Prepend the country detection header to the final answer
+    full_response = header + refined_answer
+    
+    return json.dumps({"answer": full_response})
 
-    # For debugging, we return the full JSON. In production, you might extract just the 'refined_answer'.
-    # We add the header to the final refined answer text before packaging it up.
-    try:
-        refined_data = json.loads(refined_output_json)
-        answer = refined_data.get('refined_answer', '')
-    except json.JSONDecodeError:
-        logging.error("Failed to decode JSON from refiner model.")
-        # Fallback to the draft answer if the refiner fails
-        refined_data = {
-            "evaluation": {"error": "Refiner output was not valid JSON.", "raw_output": refined_output_json},
-            "refined_answer": draft_answer 
-        }
-        answer = draft_answer
-
-    # For debugging, return the entire object as a JSON string.
-    # The 'answer' variable already contains the 'refined_answer' text.
-    refined_data['refined_answer'] = answer
-    refined_data['country_header'] = header  # Add the header to the response object
-    return json.dumps(refined_data, indent=2)
-
-# --- Azure Function Main Entry Point ---
 def main(req: func.HttpRequest) -> func.HttpResponse:
     logging.info('API function invoked.')
 
@@ -406,11 +380,9 @@ def main(req: func.HttpRequest) -> func.HttpResponse:
         answer = chat(question, client, config)
 
         # Return the response
-        # The 'chat' function now returns a JSON string, so we set the mimetype accordingly
         return func.HttpResponse(answer, mimetype="application/json", status_code=200)
 
     except Exception as e:
-        # Log the full exception traceback for detailed diagnostics
         logging.error(f"An unexpected error occurred: {e}", exc_info=True)
         return func.HttpResponse(
             f"An internal server error occurred. Please check the logs for details. Error ID: {getattr(e, 'error_id', 'N/A')}", 
