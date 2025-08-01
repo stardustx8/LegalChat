@@ -7,6 +7,7 @@ import json
 import requests
 
 import azure.functions as func
+# Trigger workflow test - both frontend and backend operational
 from azure.core.credentials import AzureKeyCredential
 from azure.search.documents import SearchClient
 

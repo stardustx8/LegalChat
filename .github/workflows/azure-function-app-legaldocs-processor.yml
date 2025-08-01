@@ -7,6 +7,9 @@ on:
   push:
     branches:
       - main
+    paths:
+      - 'LegalDocProcessor/**'
+      - '.github/workflows/azure-function-app-legaldocs-processor.yml'
   workflow_dispatch:
 
 jobs:
