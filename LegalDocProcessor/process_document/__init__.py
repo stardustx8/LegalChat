@@ -26,9 +26,25 @@ def main(myblob: func.InputStream):
         import docx2txt
         logging.info("docx2txt import: SUCCESS")
         
-        logging.info("Testing langchain import...")
-        from langchain.text_splitter import RecursiveCharacterTextSplitter
-        logging.info("langchain import: SUCCESS")
+        logging.info("Testing simple text splitter (no langchain)...")
+        # Simple text splitter function to avoid langchain dependency
+        def simple_text_splitter(text, chunk_size=1000, chunk_overlap=200):
+            chunks = []
+            start = 0
+            while start < len(text):
+                end = start + chunk_size
+                if end < len(text):
+                    # Find the last space within the chunk to avoid breaking words
+                    while end > start and text[end] != ' ':
+                        end -= 1
+                    if end == start:  # No space found, use original end
+                        end = start + chunk_size
+                chunk = text[start:end].strip()
+                if chunk:
+                    chunks.append(chunk)
+                start = end - chunk_overlap if end > chunk_overlap else end
+            return chunks
+        logging.info("Simple text splitter: SUCCESS")
         
         logging.info("Testing azure.core import...")
         from azure.core.credentials import AzureKeyCredential
