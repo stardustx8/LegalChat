@@ -234,9 +234,27 @@ def chat(question: str, client: AzureOpenAI, config: dict) -> str:
             no_docs_message = f"No documents found for the specified countries: {', '.join(iso_codes)}. Please try another query or check if the relevant legislation is available."
             return json.dumps({"answer": header + no_docs_message})
         
-        # SIMPLIFIED VERSION: Just return the retrieved documents without OpenAI processing
+        # TEST: Try a simple OpenAI chat completion to verify the chat API works
+        logging.info("DEBUG: Testing simple OpenAI chat completion...")
+        try:
+            test_response = client.chat.completions.create(
+                model=config['deploy_chat'],
+                messages=[
+                    {"role": "system", "content": "You are a helpful assistant."},
+                    {"role": "user", "content": "Say 'OpenAI chat is working!'"}
+                ],
+                max_tokens=20,
+                temperature=0.0
+            )
+            chat_test_result = test_response.choices[0].message.content.strip()
+            logging.info(f"DEBUG: OpenAI chat test successful: {chat_test_result}")
+        except Exception as chat_error:
+            logging.error(f"DEBUG: OpenAI chat test failed: {chat_error}")
+            return json.dumps({"error": f"OpenAI chat completion failed: {str(chat_error)}"})
+        
+        # SIMPLIFIED VERSION: Return the retrieved documents with chat test result
         logging.info("DEBUG: Returning simplified response with retrieved documents")
-        simple_answer = f"Found {len(chunks)} documents for {', '.join(iso_codes)}. Documents retrieved successfully!"
+        simple_answer = f"Found {len(chunks)} documents for {', '.join(iso_codes)}. Documents retrieved successfully!\n\nOpenAI Chat Test: {chat_test_result}"
         
         # Include first chunk as sample
         if chunks:
