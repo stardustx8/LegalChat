@@ -354,32 +354,59 @@ def chat(question: str, client: AzureOpenAI, config: dict) -> str:
 
 # --- Azure Function Main Entry Point ---
 def main(req: func.HttpRequest) -> func.HttpResponse:
-    logging.info('API function invoked.')
-
-    # 1. Load and validate all required environment variables
+    logging.info('DIAGNOSTIC: API function invoked.')
+    
+    diagnostic_info = {
+        "step": "initialization",
+        "environment_variables": {},
+        "error": None,
+        "question": None
+    }
+    
     try:
+        # Step 1: Check environment variables
+        logging.info('DIAGNOSTIC: Checking environment variables...')
         required_vars = {
             "search_endpoint": "KNIFE_SEARCH_ENDPOINT",
             "search_key": "KNIFE_SEARCH_KEY",
             "openai_endpoint": "KNIFE_OPENAI_ENDPOINT",
             "openai_key": "KNIFE_OPENAI_KEY"
         }
+        
+        # Check which environment variables are available
+        for key, env_var in required_vars.items():
+            value = os.environ.get(env_var)
+            diagnostic_info["environment_variables"][env_var] = "SET" if value else "MISSING"
+            if value:
+                logging.info(f'DIAGNOSTIC: {env_var} is set (length: {len(value)})')
+            else:
+                logging.error(f'DIAGNOSTIC: {env_var} is MISSING')
+        
+        # Check optional variables
+        optional_vars = {
+            "KNIFE_SEARCH_INDEX": os.environ.get("KNIFE_SEARCH_INDEX", "knife-index"),
+            "OPENAI_CHAT_DEPLOY": os.environ.get("OPENAI_CHAT_DEPLOY", "gpt-4.1"),
+            "OPENAI_EMBED_DEPLOY": os.environ.get("OPENAI_EMBED_DEPLOY", "text-embedding-3-large"),
+            "OPENAI_API_VERSION": os.environ.get("OPENAI_API_VERSION", "2024-02-15-preview")
+        }
+        
+        for key, value in optional_vars.items():
+            diagnostic_info["environment_variables"][key] = value
+            logging.info(f'DIAGNOSTIC: {key} = {value}')
+        
+        # Try to build config
+        diagnostic_info["step"] = "building_config"
         config = {key: os.environ[val] for key, val in required_vars.items()}
-
-        # Add optional vars with defaults
         config.update({
-            "index_name": os.environ.get("KNIFE_SEARCH_INDEX", "knife-index"),
-            "deploy_chat": os.environ.get("OPENAI_CHAT_DEPLOY", "gpt-4.1"),
-            "deploy_embed": os.environ.get("OPENAI_EMBED_DEPLOY", "text-embedding-3-large"),
-            "api_version": os.environ.get("OPENAI_API_VERSION", "2024-02-15-preview")
+            "index_name": optional_vars["KNIFE_SEARCH_INDEX"],
+            "deploy_chat": optional_vars["OPENAI_CHAT_DEPLOY"],
+            "deploy_embed": optional_vars["OPENAI_EMBED_DEPLOY"],
+            "api_version": optional_vars["OPENAI_API_VERSION"]
         })
-    except KeyError as e:
-        error_msg = f"Configuration error: Missing required environment variable: {e}"
-        logging.error(error_msg)
-        return func.HttpResponse(error_msg, status_code=500)
-
-    # 2. Process the request and run the RAG pipeline
-    try:
+        logging.info('DIAGNOSTIC: Configuration built successfully')
+        
+        # Step 2: Extract question
+        diagnostic_info["step"] = "extracting_question"
         question = req.params.get('question')
         if not question:
             try:
@@ -388,31 +415,111 @@ def main(req: func.HttpRequest) -> func.HttpResponse:
                 pass
             else:
                 question = req_body.get('question')
-
+        
+        diagnostic_info["question"] = question
+        logging.info(f'DIAGNOSTIC: Question extracted: {question}')
+        
         if not question:
             return func.HttpResponse(
-                "Please pass a question on the query string or in the request body, e.g., /api/ask?question=...",
+                json.dumps({
+                    "error": "No question provided",
+                    "diagnostic": diagnostic_info
+                }, indent=2),
+                mimetype="application/json",
                 status_code=400
             )
-
-        # Initialize the Azure OpenAI client
-        client = AzureOpenAI(
-            azure_endpoint=config['openai_endpoint'],
-            api_key=config['openai_key'],
-            api_version=config['api_version'],
+        
+        # Step 3: Try to initialize Azure OpenAI client
+        diagnostic_info["step"] = "initializing_openai_client"
+        logging.info('DIAGNOSTIC: Initializing Azure OpenAI client...')
+        
+        try:
+            client = AzureOpenAI(
+                azure_endpoint=config['openai_endpoint'],
+                api_key=config['openai_key'],
+                api_version=config['api_version'],
+            )
+            logging.info('DIAGNOSTIC: Azure OpenAI client initialized successfully')
+        except Exception as openai_error:
+            logging.error(f'DIAGNOSTIC: Failed to initialize OpenAI client: {openai_error}')
+            diagnostic_info["error"] = f"OpenAI client initialization failed: {str(openai_error)}"
+            return func.HttpResponse(
+                json.dumps({
+                    "error": "OpenAI client initialization failed",
+                    "details": str(openai_error),
+                    "diagnostic": diagnostic_info
+                }, indent=2),
+                mimetype="application/json",
+                status_code=500
+            )
+        
+        # Step 4: Try a simple OpenAI API call
+        diagnostic_info["step"] = "testing_openai_api"
+        logging.info('DIAGNOSTIC: Testing OpenAI API call...')
+        
+        try:
+            test_response = client.chat.completions.create(
+                model=config['deploy_chat'],
+                messages=[
+                    {"role": "system", "content": "You are a helpful assistant."},
+                    {"role": "user", "content": "Say 'Hello, this is a test!'"}
+                ],
+                max_tokens=10,
+                temperature=0.0
+            )
+            test_result = test_response.choices[0].message.content.strip()
+            logging.info(f'DIAGNOSTIC: OpenAI API test successful: {test_result}')
+            diagnostic_info["openai_test_result"] = test_result
+        except Exception as api_error:
+            logging.error(f'DIAGNOSTIC: OpenAI API test failed: {api_error}')
+            diagnostic_info["error"] = f"OpenAI API test failed: {str(api_error)}"
+            return func.HttpResponse(
+                json.dumps({
+                    "error": "OpenAI API test failed",
+                    "details": str(api_error),
+                    "diagnostic": diagnostic_info
+                }, indent=2),
+                mimetype="application/json",
+                status_code=500
+            )
+        
+        # If we get here, everything is working
+        diagnostic_info["step"] = "success"
+        logging.info('DIAGNOSTIC: All tests passed successfully!')
+        
+        return func.HttpResponse(
+            json.dumps({
+                "status": "success",
+                "message": "All diagnostic tests passed! The API is working correctly.",
+                "diagnostic": diagnostic_info
+            }, indent=2),
+            mimetype="application/json",
+            status_code=200
         )
-
-        # Execute the RAG pipeline
-        answer = chat(question, client, config)
-
-        # Return the response
-        # The 'chat' function now returns a JSON string, so we set the mimetype accordingly
-        return func.HttpResponse(answer, mimetype="application/json", status_code=200)
-
+        
+    except KeyError as e:
+        error_msg = f"Configuration error: Missing required environment variable: {e}"
+        logging.error(f'DIAGNOSTIC: {error_msg}')
+        diagnostic_info["error"] = error_msg
+        return func.HttpResponse(
+            json.dumps({
+                "error": "Missing environment variable",
+                "details": error_msg,
+                "diagnostic": diagnostic_info
+            }, indent=2),
+            mimetype="application/json",
+            status_code=500
+        )
     except Exception as e:
         # Log the full exception traceback for detailed diagnostics
-        logging.error(f"An unexpected error occurred: {e}", exc_info=True)
+        logging.error(f"DIAGNOSTIC: Unexpected error occurred: {e}", exc_info=True)
+        diagnostic_info["error"] = str(e)
         return func.HttpResponse(
-            f"An internal server error occurred. Please check the logs for details. Error ID: {getattr(e, 'error_id', 'N/A')}", 
+            json.dumps({
+                "error": "Unexpected error",
+                "details": str(e),
+                "diagnostic": diagnostic_info
+            }, indent=2),
+            mimetype="application/json",
             status_code=500
         )
