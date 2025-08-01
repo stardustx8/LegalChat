@@ -181,7 +181,7 @@ def build_response_header(iso_codes: list[str], found_iso_codes: set[str]) -> st
     return f"{main_header}\n\n{table}\n\n---\n\n"
 
 GRADER_REFINER_PROMPT = """
-create a draft answer to the users question according to the context provided
+draft an answer based on the context provided
 """
 
 def chat(question: str, client: AzureOpenAI, config: dict) -> str:
@@ -201,7 +201,7 @@ def chat(question: str, client: AzureOpenAI, config: dict) -> str:
         return header + no_docs_message
 
     drafter_system_message = """
-refine the draft answer to the users question according to the context provided
+refine the answer based on the context provided
     """
     context = "\n\n---\n\n".join([c['content'] for c in chunks])
     
