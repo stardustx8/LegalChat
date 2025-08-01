@@ -186,71 +186,96 @@ draft an answer based on the context provided
 
 def chat(question: str, client: AzureOpenAI, config: dict) -> str:
     """Orchestrates the RAG pipeline to answer a question."""
-    iso_codes = extract_iso_codes(question, client, config['deploy_chat'])
-    if not iso_codes:
-        return "Could not determine a country from your query. Please be more specific."
+    logging.info("DEBUG: Starting chat function")
+    
+    try:
+        logging.info("DEBUG: Step 1 - Extracting ISO codes")
+        iso_codes = extract_iso_codes(question, client, config['deploy_chat'])
+        logging.info(f"DEBUG: ISO codes extracted: {iso_codes}")
+        
+        if not iso_codes:
+            logging.info("DEBUG: No ISO codes found, returning error message")
+            return "Could not determine a country from your query. Please be more specific."
 
-    logging.info(f"Detected countries: {', '.join(iso_codes)}")
-    chunks = retrieve(question, iso_codes, client, config, k=5)
+        logging.info("DEBUG: Step 2 - Retrieving documents")
+        chunks = retrieve(question, iso_codes, client, config, k=5)
+        logging.info(f"DEBUG: Retrieved {len(chunks)} chunks")
 
-    if not chunks:
-        # Even if no docs are found, we can still show the header with availability status
-        found_iso_codes = set()
-        header = build_response_header(iso_codes, found_iso_codes)
-        no_docs_message = f"No documents found for the specified countries: {', '.join(iso_codes)}. Please try another query or check if the relevant legislation is available."
-        return header + no_docs_message
+        if not chunks:
+            logging.info("DEBUG: No chunks found, building no-docs response")
+            # Even if no docs are found, we can still show the header with availability status
+            found_iso_codes = set()
+            header = build_response_header(iso_codes, found_iso_codes)
+            no_docs_message = f"No documents found for the specified countries: {', '.join(iso_codes)}. Please try another query or check if the relevant legislation is available."
+            logging.info("DEBUG: Returning no-docs message")
+            return header + no_docs_message
 
-    drafter_system_message = """
+        logging.info("DEBUG: Step 3 - Preparing context and drafting")
+        drafter_system_message = """
 refine the answer based on the context provided
-    """
-    context = "\n\n---\n\n".join([c['content'] for c in chunks])
-    
-    # --- Step 1: Draft Answer ---
-    logging.info("Generating draft answer...")
-    draft_resp = client.chat.completions.create(
-        model=config['deploy_chat'],
-        messages=[
-            {"role": "system", "content": drafter_system_message},
-            {"role": "user", "content": f"Context:\n{context}\n\nQuestion: {question}"}
-        ],
-        temperature=0.0, # Keep draft deterministic
-    )
-    draft_answer = draft_resp.choices[0].message.content.strip()
-    logging.info("Draft answer generated.")
+        """
+        context = "\n\n---\n\n".join([c['content'] for c in chunks])
+        logging.info(f"DEBUG: Context length: {len(context)} characters")
+        
+        # --- Step 1: Draft Answer ---
+        logging.info("DEBUG: Step 4 - Calling OpenAI for draft answer...")
+        try:
+            draft_resp = client.chat.completions.create(
+                model=config['deploy_chat'],
+                messages=[
+                    {"role": "system", "content": drafter_system_message},
+                    {"role": "user", "content": f"Context:\n{context}\n\nQuestion: {question}"}
+                ],
+                temperature=0.0, # Keep draft deterministic
+            )
+            draft_answer = draft_resp.choices[0].message.content.strip()
+            logging.info("DEBUG: Draft answer generated successfully")
+        except Exception as draft_error:
+            logging.error(f"DEBUG: Draft step failed: {draft_error}")
+            raise
 
-    # Build the dynamic markdown table header
-    found_iso_codes = {chunk['iso_code'] for chunk in chunks}
-    header = build_response_header(iso_codes, found_iso_codes)
-    
-    # Prepend header to the draft answer before sending to refiner
-    draft_with_header = header + draft_answer
+        logging.info("DEBUG: Step 5 - Building response header")
+        # Build the dynamic markdown table header
+        found_iso_codes = {chunk['iso_code'] for chunk in chunks}
+        header = build_response_header(iso_codes, found_iso_codes)
+        
+        # Prepend header to the draft answer before sending to refiner
+        draft_with_header = header + draft_answer
+        logging.info("DEBUG: Header built and prepended to draft")
 
-    # --- Step 2: Grade and Refine Answer ---
-    logging.info("Grading and refining answer...")
-    refiner_user_message = f"""CONTEXT:\n{context}\n\nQUESTION: {question}\n\nDRAFT_ANSWER:\n{draft_with_header}"""
+        # --- Step 2: Grade and Refine Answer ---
+        logging.info("DEBUG: Step 6 - Calling OpenAI for refining...")
+        refiner_user_message = f"""CONTEXT:\n{context}\n\nQUESTION: {question}\n\nDRAFT_ANSWER:\n{draft_with_header}"""
+        logging.info(f"DEBUG: Refiner message length: {len(refiner_user_message)} characters")
 
-    refine_resp = client.chat.completions.create(
-        model=config['deploy_chat'], # Use the best model for this complex task
-        # response_format={"type": "json_object"},  # REMOVED: This was causing internal server errors
-        messages=[
-            {"role": "system", "content": GRADER_REFINER_PROMPT},
-            {"role": "user", "content": refiner_user_message}
-        ],
-        temperature=0.0,
-    )
-    
-    refined_output_json = refine_resp.choices[0].message.content.strip()
-    logging.info("Refined answer generated.")
+        try:
+            refine_resp = client.chat.completions.create(
+                model=config['deploy_chat'], # Use the best model for this complex task
+                # response_format={"type": "json_object"},  # REMOVED: This was causing internal server errors
+                messages=[
+                    {"role": "system", "content": GRADER_REFINER_PROMPT},
+                    {"role": "user", "content": refiner_user_message}
+                ],
+                temperature=0.0,
+            )
+            refined_output_json = refine_resp.choices[0].message.content.strip()
+            logging.info("DEBUG: Refined answer generated successfully")
+        except Exception as refine_error:
+            logging.error(f"DEBUG: Refine step failed: {refine_error}")
+            raise
 
-    # Since we removed JSON format requirement, treat the response as plain text
-    logging.info("Processing refined answer as plain text...")
-    
-    # The refined response is now plain text, not JSON
-    refined_answer = refined_output_json.strip()
-    
-    # Return the refined answer with header
-    final_answer = header + refined_answer
-    return json.dumps({"answer": final_answer})
+        logging.info("DEBUG: Step 7 - Processing final response")
+        # Since we removed JSON format requirement, treat the response as plain text
+        refined_answer = refined_output_json.strip()
+        
+        # Return the refined answer with header
+        final_answer = header + refined_answer
+        logging.info("DEBUG: Final answer prepared, returning JSON response")
+        return json.dumps({"answer": final_answer})
+        
+    except Exception as e:
+        logging.error(f"DEBUG: Chat function failed at some step: {e}", exc_info=True)
+        return json.dumps({"error": f"Chat function failed: {str(e)}"})
 
 # --- Azure Function Main Entry Point ---
 def main(req: func.HttpRequest) -> func.HttpResponse:
