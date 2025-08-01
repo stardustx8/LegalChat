@@ -3,11 +3,12 @@ import os
 import re
 import tempfile
 import docx2txt
+import json
+import requests
 
 import azure.functions as func
 from azure.core.credentials import AzureKeyCredential
 from azure.search.documents import SearchClient
-import openai
 
 # Simple text splitter function to avoid langchain dependency
 def simple_text_splitter(text, chunk_size=1000, chunk_overlap=200):
@@ -63,11 +64,12 @@ def main(myblob: func.InputStream):
         logging.error(f"Missing required environment variables: {', '.join(missing_vars)}")
         return
 
-    # Initialize OpenAI client
-    openai.api_type = "azure"
-    openai.api_base = openai_endpoint
-    openai.api_version = "2023-05-15"
-    openai.api_key = openai_key
+    # Prepare OpenAI REST API headers and endpoint
+    openai_headers = {
+        "Content-Type": "application/json",
+        "api-key": openai_key
+    }
+    openai_url = f"{openai_endpoint}/openai/deployments/{openai_embedding_deployment}/embeddings?api-version=2023-05-15"
 
     # Initialize Search client
     search_credential = AzureKeyCredential(search_key)
@@ -105,11 +107,15 @@ def main(myblob: func.InputStream):
         # Generate embeddings and prepare documents for upload
         docs_to_upload = []
         for i, chunk in enumerate(chunks):
-            response = openai.Embedding.create(
-                input=chunk,
-                engine=openai_embedding_deployment
-            )
-            embedding = response['data'][0]['embedding']
+            # Make direct REST API call to Azure OpenAI
+            payload = {
+                "input": chunk
+            }
+            response = requests.post(openai_url, headers=openai_headers, json=payload)
+            response.raise_for_status()
+            embedding_data = response.json()
+            embedding = embedding_data['data'][0]['embedding']
+            
             doc = {
                 "id": f"{iso_code}-{i}",
                 "chunk": chunk,
