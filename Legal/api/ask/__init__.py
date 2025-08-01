@@ -210,148 +210,46 @@ GRADER_REFINER_PROMPT = """
 
 def chat(question: str, client: AzureOpenAI, config: dict) -> str:
     """Orchestrates the RAG pipeline to answer a question."""
-    iso_codes = extract_iso_codes(question, client, config['deploy_chat'])
-    if not iso_codes:
-        return "Could not determine a country from your query. Please be more specific."
+    logging.info("DEBUG: Starting chat function")
+    
+    try:
+        logging.info("DEBUG: Extracting ISO codes...")
+        iso_codes = extract_iso_codes(question, client, config['deploy_chat'])
+        logging.info(f"DEBUG: Extracted ISO codes: {iso_codes}")
+        
+        if not iso_codes:
+            logging.info("DEBUG: No ISO codes found")
+            return json.dumps({"answer": "Could not determine a country from your query. Please be more specific."})
 
-    logging.info(f"Detected countries: {', '.join(iso_codes)}")
-    chunks = retrieve(question, iso_codes, client, config, k=5)
-
-    if not chunks:
-        # Even if no docs are found, we can still show the header with availability status
-        found_iso_codes = set()
+        logging.info(f"Detected countries: {', '.join(iso_codes)}")
+        chunks = retrieve(question, iso_codes, client, config, k=5)
+        logging.info(f"DEBUG: Retrieved {len(chunks)} chunks")
+        
+        found_iso_codes = {chunk['iso_code'] for chunk in chunks}
         header = build_response_header(iso_codes, found_iso_codes)
-        no_docs_message = f"No documents found for the specified countries: {', '.join(iso_codes)}. Please try another query or check if the relevant legislation is available."
-        return header + no_docs_message
+        logging.info("DEBUG: Built response header")
 
-    drafter_system_message = """
-{
-  "role": "expert_legal_research_assistant",
-  "private_thought_key": "internal_chain_of_thought",
+        if not chunks:
+            logging.info("DEBUG: No chunks found, returning no docs message")
+            no_docs_message = f"No documents found for the specified countries: {', '.join(iso_codes)}. Please try another query or check if the relevant legislation is available."
+            return json.dumps({"answer": header + no_docs_message})
+        
+        # SIMPLIFIED VERSION: Just return the retrieved documents without OpenAI processing
+        logging.info("DEBUG: Returning simplified response with retrieved documents")
+        simple_answer = f"Found {len(chunks)} documents for {', '.join(iso_codes)}. Documents retrieved successfully!"
+        
+        # Include first chunk as sample
+        if chunks:
+            sample_chunk = chunks[0]
+            simple_answer += f"\n\nSample document: {sample_chunk.get('chunk', 'No content')[:200]}..."
+        
+        return json.dumps({"answer": header + simple_answer})
+        
+    except Exception as e:
+        logging.error(f"DEBUG: Error in chat function: {e}", exc_info=True)
+        return json.dumps({"error": f"Chat function failed: {str(e)}"})
 
-  /*―――――――――― WORKFLOW ――――――――――*/
-  "workflow": [
-    { "step": "collect_passages",
-      "action": "retrieve candidate chunks responsive to the user question" },
-
-    { "step": "re_rank",
-      "action": "order candidates by combined semantic + lexical relevance" },
-
-    { "step": "necessity_filter",
-      "action": "KEEP a passage only if removing it would break support for ≥ 1 intended public statement" },
-
-    { "step": "scope_lock",
-      "action": "Identify the legal object(s) & jurisdiction(s); DROP passages about other objects or places" },
-
-    { "step": "salience_upgrade",
-      "action": "From the kept passages extract every element that conditions legality:  \n                 • numeric thresholds (length, amount, age, time, penalty, etc.)  \n                 • categorical qualifiers (e.g. “automatic”, “concealed”, “professional use”)  \n                 • explicit exceptions / carve‑outs / special categories (e.g. butterfly knives, antique items)  \n                 • permit / licence or exemption regimes  \n                 • enforcement or penalty provisions  \n                 • age or capacity prerequisites explicitly stated in the text  \n                 • lawful‑tool / dangerous‑object clauses  \n                 Mark **each** item as MUST‑MENTION verbatim (units included)." },
-
-    { "step": "deduplicate",
-      "action": "When two passages support the same atomic fact, keep the shorter, more precise one" },
-
-    { "step": "draft_answer",
-      "action": "Write exactly two sections:  \n                 – TL;DR Summary: bullet list; every bullet begins with a bold key phrase, includes all relevant MUST‑MENTION items for that point, and ends with ≥ 1 citation.  \n                 – Detailed Explanation: flowing prose; EVERY sentence ends with ≥ 1 citation.  \n                 Do NOT add tables, extra headings, or uncited assertions." },
-
-    { "step": "citation_pruner",
-      "action": "Within each citation list, drop any passage whose removal leaves the sentence fully supported; delete sentences whose lists become empty." },
-
-    { "step": "fact_source_check",
-      "action": "For EVERY factual fragment: confirm it is explicitly present (or directly inferable) in at least one cited passage.  \n                 – If a claim is *negative* (e.g. “no age restriction”, “no permit required”) you must either:  \n                   (a) cite a passage that expressly states the absence, OR  \n                   (b) write “The supplied sources do not address …” **without attaching any citation**.  \n                 – If support is lacking: delete, rewrite, or express uncertainty with qualifying language." },
-
-    { "step": "permit_check",
-      "action": "If any kept passage mentions a permit, licence, or exemption regime, ensure TL;DR contains a bullet that names the rule, states whether the object requires it, and cites the permit passage.  Fail otherwise." },
-
-    { "step": "alignment_check",
-      "action": "Fail if:  \n                 (a) any sentence lacks a citation;  \n                 (b) a citation points to a dropped passage;  \n                 (c) ANY MUST‑MENTION item is missing or altered;  \n                 (d) output contains forbidden tables or headings." },
-
-    { "step": "format_guard",
-      "action": "Final sweep: ensure only the two authorised markdown headings; strip stray blank lines; verify no sentence is citation‑free." }
-  ],
-
-  /*―――――――― CITATION POLICY ――――――――*/
-  "citation_policy": {
-    "in_corpus": "Use exactly: (KL {ISO-code} §section[, §section…])",
-    "external_quote": "Reproduce the statute’s own citation string verbatim as shown in the passage"
-  },
-
-  /*―――――――― OUTPUT FORMAT ――――――――*/
-  "output_format": {
-    "sections": ["TL;DR Summary", "Detailed Explanation"],
-    "markdown_headings": true
-    /* no hard limits—provide all salient information */
-  },
-
-  /*―――――――― FAILURE MODES ――――――――*/
-  "failure_modes": {
-    "no_relevant_passages": "<CASEB>",
-    "validation_error": "<PROMPT‑VIOLATION>"
-  },
-
-  /*―――――――― REFERENCE EXAMPLES (few‑shot guidance) ――――――――*/
-  "reference_examples": [
-    {
-      "input": "I am a professional chef commuting by car in Switzerland. May I keep my 20 cm kitchen knife in the glove box while driving to work?",
-      "retained_passages": ["KL CH §1.1", "KL CH §1.3", "KL CH §1.4"],
-      "must_mention": ["automatic one‑hand opening mechanism (absent)", "tool purpose legitimises carry"],
-      "assistant_output": {
-        "TL;DR Summary": [
-          "A fixed 20 cm chef’s knife is **not a weapon** because it lacks an automatic one‑hand opening mechanism (KL CH §1.1).",
-          "Transport is lawful when clearly for work and stowed safely; brandishing could re‑classify it as a dangerous object (KL CH §1.3).",
-          "Employers or parking‑lot owners may still ban knives (KL CH §1.4)."
-        ],
-        "Detailed Explanation": "Under the Swiss Weapons Act, only folding or dagger‑type knives meeting the one‑hand‑opening and length thresholds are weapons (KL CH §1.1). A chef’s knife is treated as a tool. Keeping it in a sheath or roll inside the glove box demonstrates legitimate use. Visible or threatening display could trigger the ‘dangerous object’ clause (KL CH §1.3). Venue rules may override federal permissiveness (KL CH §1.4)."
-      }
-    },
-    {
-      "input": "I commute between Switzerland and Germany and transit EuroAirport with a 10 cm lockable knife; may I carry it?",
-      "retained_passages": ["KL CH §1.1", "KL CH §1.3", "KL CH §1.4", "KL DE §42a Absatz 1", "KL CH‑EU‑ASM Art 4"],
-      "must_mention": ["automatic one‑hand opening mechanism", "German §42a public‑carry ban", "EU blade > 6 cm aviation limit"],
-      "assistant_output": {
-        "TL;DR Summary": [
-          "**Switzerland**: Knife is legal if it lacks automatic one‑hand opening and is carried as a tool (KL CH §1.1, §1.3).",
-          "**Germany**: One‑hand lockable knives barred from public carry (§42a Abs 1 WaffG) (KL DE §42a Abs 1).",
-          "**EuroAirport**: EU rule forbids blades > 6 cm in security zones (Reg (EU) 2015/1998 Att 4‑C) (KL CH‑EU‑ASM Art 4)."
-        ],
-        "Detailed Explanation": "Swiss law treats non‑one‑hand lockable knives as tools; improper display triggers the dangerous‑object clause (KL CH §1.3). German §42a bans public carry of lockable one‑hand knives unless a statutory exception applies (KL DE §42a Abs 1). EuroAirport enforces EU aviation security rules: blades over 6 cm cannot pass passenger checkpoints (KL CH‑EU‑ASM Art 4)."
-      }
-    }
-  ]
-}
-    """
-    context = json.dumps(chunks, indent=2)
-    user_prompt = f"CONTEXT:\n{context}\n\nQUESTION:\n{question}\n\nDRAFT_ANSWER:"
-    
-    draft_response = client.chat.completions.create(
-        model=config['deploy_chat'],
-        messages=[
-            {"role": "system", "content": drafter_system_message},
-            {"role": "user", "content": user_prompt}
-        ],
-        temperature=0.0
-    )
-    draft_answer = draft_response.choices[0].message.content
-
-    # --- Grader/Refiner Agent ---
-    refiner_user_prompt = f"CONTEXT:\n{context}\n\nQUESTION:\n{question}\n\nDRAFT_ANSWER:\n{draft_answer}"
-    
-    refiner_response = client.chat.completions.create(
-        model=config['deploy_chat'],
-        messages=[
-            {"role": "system", "content": GRADER_REFINER_PROMPT},
-            {"role": "user", "content": refiner_user_prompt}
-        ],
-        temperature=0.0,
-        response_format={"type": "json_object"}
-    )
-    
-    final_output = json.loads(refiner_response.choices[0].message.content)
-    refined_answer = final_output.get("refined_answer", "Error: Could not refine the answer.")
-    
-    # Prepend the country detection header to the final answer
-    full_response = header + refined_answer
-    
-    return json.dumps({"answer": full_response})
-
+# --- Azure Function Main Entry Point ---
 def main(req: func.HttpRequest) -> func.HttpResponse:
     logging.info('API function invoked.')
 
