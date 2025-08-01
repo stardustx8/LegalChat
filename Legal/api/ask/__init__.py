@@ -214,7 +214,7 @@ def chat(question: str, client: AzureOpenAI, config: dict) -> str:
         drafter_system_message = """
 refine the answer based on the context provided
         """
-        context = "\n\n---\n\n".join([c['content'] for c in chunks])
+        context = "\n\n---\n\n".join([c['chunk'] for c in chunks])
         logging.info(f"DEBUG: Context length: {len(context)} characters")
         
         # --- Step 1: Draft Answer ---
