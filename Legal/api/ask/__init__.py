@@ -231,7 +231,7 @@ refine the draft answer to the users question according to the context provided
 
     refine_resp = client.chat.completions.create(
         model=config['deploy_chat'], # Use the best model for this complex task
-        response_format={"type": "json_object"},
+        # response_format={"type": "json_object"},  # REMOVED: This was causing internal server errors
         messages=[
             {"role": "system", "content": GRADER_REFINER_PROMPT},
             {"role": "user", "content": refiner_user_message}
@@ -242,25 +242,15 @@ refine the draft answer to the users question according to the context provided
     refined_output_json = refine_resp.choices[0].message.content.strip()
     logging.info("Refined answer generated.")
 
-    # For debugging, we return the full JSON. In production, you might extract just the 'refined_answer'.
-    # We add the header to the final refined answer text before packaging it up.
-    try:
-        refined_data = json.loads(refined_output_json)
-        answer = refined_data.get('refined_answer', '')
-    except json.JSONDecodeError:
-        logging.error("Failed to decode JSON from refiner model.")
-        # Fallback to the draft answer if the refiner fails
-        refined_data = {
-            "evaluation": {"error": "Refiner output was not valid JSON.", "raw_output": refined_output_json},
-            "refined_answer": draft_answer 
-        }
-        answer = draft_answer
-
-    # For debugging, return the entire object as a JSON string.
-    # The 'answer' variable already contains the 'refined_answer' text.
-    refined_data['refined_answer'] = answer
-    refined_data['country_header'] = header  # Add the header to the response object
-    return json.dumps(refined_data, indent=2)
+    # Since we removed JSON format requirement, treat the response as plain text
+    logging.info("Processing refined answer as plain text...")
+    
+    # The refined response is now plain text, not JSON
+    refined_answer = refined_output_json.strip()
+    
+    # Return the refined answer with header
+    final_answer = header + refined_answer
+    return json.dumps({"answer": final_answer})
 
 # --- Azure Function Main Entry Point ---
 def main(req: func.HttpRequest) -> func.HttpResponse:
