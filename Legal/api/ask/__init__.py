@@ -363,26 +363,32 @@ r{
         refiner_user_message = f"""CONTEXT:\n{context}\n\nQUESTION: {question}\n\nDRAFT_ANSWER:\n{draft_with_header}"""
         logging.info(f"DEBUG: Refiner message length: {len(refiner_user_message)} characters")
 
-        refine_resp = client.chat.completions.create(
-        model=config['deploy_chat'], # Use the best model for this complex task
-        response_format={"type": "json_object"},
-        messages=[
-            {"role": "system", "content": GRADER_REFINER_PROMPT},
-            {"role": "user", "content": refiner_user_message}
-        ],
-        temperature=0.0,
-        )
-        
-        refined_output_json = refine_resp.choices[0].message.content.strip()
-        logging.info("Refined answer generated.")
+        try:
+            refine_resp = client.chat.completions.create(
+                model=config['deploy_chat'], # Use the best model for this complex task
+                response_format={"type": "json_object"},
+                messages=[
+                    {"role": "system", "content": GRADER_REFINER_PROMPT},
+                    {"role": "user", "content": refiner_user_message}
+                ],
+                temperature=0.0,
+            )
+            refined_output_json = refine_resp.choices[0].message.content.strip()
+            logging.info("DEBUG: Refined answer generated successfully")
+        except Exception as refine_error:
+            logging.error(f"DEBUG: Refine step failed: {refine_error}")
+            raise
 
+        logging.info("DEBUG: Step 7 - Processing JSON response")
         # For debugging, we return the full JSON. In production, you might extract just the 'refined_answer'.
         # We add the header to the final refined answer text before packaging it up.
         try:
             refined_data = json.loads(refined_output_json)
             answer = refined_data.get('refined_answer', '')
-        except json.JSONDecodeError:
-            logging.error("Failed to decode JSON from refiner model.")
+            logging.info("DEBUG: JSON parsing successful")
+        except json.JSONDecodeError as json_error:
+            logging.error(f"DEBUG: Failed to decode JSON from refiner model: {json_error}")
+            logging.error(f"DEBUG: Raw refiner output: {refined_output_json[:500]}...")
             # Fallback to the draft answer if the refiner fails
             refined_data = {
                 "evaluation": {"error": "Refiner output was not valid JSON.", "raw_output": refined_output_json},
@@ -390,11 +396,17 @@ r{
             }
             answer = draft_answer
 
+        logging.info("DEBUG: Step 8 - Building final response")
         # For debugging, return the entire object as a JSON string.
         # The 'answer' variable already contains the 'refined_answer' text.
         refined_data['refined_answer'] = answer
         refined_data['country_header'] = header  # Add the header to the response object
+        logging.info("DEBUG: Final JSON response prepared")
         return json.dumps(refined_data, indent=2)
+        
+    except Exception as e:
+        logging.error(f"DEBUG: Chat function failed at some step: {e}", exc_info=True)
+        return json.dumps({"error": f"Chat function failed: {str(e)}"})
 
 # --- Azure Function Main Entry Point ---
 def main(req: func.HttpRequest) -> func.HttpResponse:
