@@ -97,10 +97,19 @@ def extract_iso_codes(text: str, client: AzureOpenAI, deploy_chat: str) -> list[
 
 def retrieve(query: str, iso_codes: list[str], client: AzureOpenAI, config: dict, k: int = 5) -> list[dict]:
     """Retrieves documents from Azure Cognitive Search based on a vector query and filters."""
+    logging.info(f"DEBUG: retrieve() called with query='{query}', iso_codes={iso_codes}")
+    
     if not iso_codes:
+        logging.info("DEBUG: No ISO codes provided, returning empty list")
         return []
     
-    vec = embed(query, client, config['deploy_embed'])
+    try:
+        logging.info("DEBUG: Generating embedding for query...")
+        vec = embed(query, client, config['deploy_embed'])
+        logging.info(f"DEBUG: Embedding generated successfully, length={len(vec)}")
+    except Exception as e:
+        logging.error(f"DEBUG: Failed to generate embedding: {e}")
+        raise
     
     search_url = f"{config['search_endpoint']}/indexes/{config['index_name']}/docs/search?api-version=2023-11-01"
     headers = {'Content-Type': 'application/json', 'api-key': config['search_key']}
@@ -119,9 +128,25 @@ def retrieve(query: str, iso_codes: list[str], client: AzureOpenAI, config: dict
         "select": "chunk,iso_code,id"
     }
     
-    response = requests.post(search_url, headers=headers, json=payload)
-    response.raise_for_status()
-    return response.json().get('value', [])
+    logging.info(f"DEBUG: Sending search request to {search_url}")
+    logging.info(f"DEBUG: Filter: {filter_str}")
+    logging.info(f"DEBUG: Payload keys: {list(payload.keys())}")
+    
+    try:
+        response = requests.post(search_url, headers=headers, json=payload)
+        logging.info(f"DEBUG: Search response status: {response.status_code}")
+        response.raise_for_status()
+        result = response.json().get('value', [])
+        logging.info(f"DEBUG: Search returned {len(result)} documents")
+        return result
+    except requests.exceptions.RequestException as e:
+        logging.error(f"DEBUG: Search request failed: {e}")
+        if hasattr(e, 'response') and e.response is not None:
+            logging.error(f"DEBUG: Response content: {e.response.text}")
+        raise
+    except Exception as e:
+        logging.error(f"DEBUG: Unexpected error in retrieve: {e}")
+        raise
 
 def iso_to_flag(iso_code: str) -> str:
     """Converts a two-letter ISO country code to a flag emoji."""
