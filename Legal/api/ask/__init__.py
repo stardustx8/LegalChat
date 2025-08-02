@@ -255,24 +255,31 @@ You are a specialized legal document evaluator and refiner. Your task is to syst
 
 ## EVALUATION METHODOLOGY (Industry Best Practice)
 
-### Step 1: Extract Ground Truth Facts (Jurisdiction-Aware)
+### Step 1: Extract Ground Truth Facts (RAG-Only, Jurisdiction-Aware)
 From the CONTEXT documents (each marked as **SOURCE N: KL XX**), create a comprehensive inventory of ALL relevant legal facts.
 
-**CRITICAL: For multi-jurisdictional queries, ensure COMPLETE coverage from ALL jurisdictions:**
-- If query involves multiple countries/jurisdictions, extract facts from EACH jurisdiction separately
-- For cross-border scenarios (e.g., EuroAirport, international travel), include:
-  - Country-specific regulations from each jurisdiction
-  - International/EU rules that apply
-  - Transit/border-crossing specific rules
-  - Conflict resolution between jurisdictions
+**CRITICAL CONSTRAINTS:**
+- **RAG-ONLY**: Use ONLY the provided CONTEXT documents as ground truth - no external legal knowledge
+- **COMPREHENSIVE**: Extract EVERY relevant fact from the provided sources
+- **JURISDICTION-AWARE**: For multi-jurisdictional queries, ensure COMPLETE coverage from ALL jurisdictions
 
-**Extract these fact types from EACH relevant jurisdiction:**
-- Explicit rules and prohibitions
-- Exceptions and exemptions  
-- Procedural requirements
-- Definitions and classifications
-- Age limits, measurement criteria, etc.
-- Cross-border/international provisions
+**For multi-jurisdictional queries, extract from EACH jurisdiction separately:**
+- Country-specific regulations from each provided jurisdiction document
+- International/EU rules that appear in the provided sources
+- Transit/border-crossing specific rules found in the context
+- Conflict resolution between jurisdictions as stated in the sources
+
+**Extract these fact types from EACH relevant jurisdiction (be exhaustive):**
+- Explicit rules and prohibitions (what is/isn't allowed)
+- Exceptions and exemptions (who/what/when exceptions apply)
+- Procedural requirements (permits, licenses, registration)
+- Definitions and classifications (what constitutes X, categories)
+- Age limits, measurement criteria, thresholds (specific numbers/limits)
+- Cross-border/international provisions (transit, import/export rules)
+- Penalties and consequences (what happens if violated)
+- Temporal aspects (time limits, validity periods)
+- Location-specific rules (public vs private, specific venues)
+- Conditional requirements (if X then Y rules)
 
 **For each fact, note:**
 - Exact source reference (SOURCE N: KL XX format from context)
@@ -290,10 +297,11 @@ For EACH fact in your ground truth inventory (ensuring complete coverage of ALL 
 - ❌ MISSING: Fact is completely absent
 - ⚠️ UNCLEAR: Fact is mentioned but lacks clarity/precision
 
-**PRECISION CHECK**: For each claim in the draft:
-- ✅ SUPPORTED: Claim has clear textual support in context
-- ❌ UNSUPPORTED: Claim lacks adequate source support
-- ⚠️ IMPRECISE: Citation exists but doesn't match claim content
+**PRECISION CHECK** (RAG-Only): For each claim in the draft:
+- ✅ SUPPORTED: Claim has exact textual support in provided CONTEXT with correct SOURCE reference
+- ❌ UNSUPPORTED: Claim lacks any support in the provided CONTEXT documents
+- ⚠️ IMPRECISE: Citation references wrong SOURCE or misquotes the provided text
+- 🚫 EXTERNAL: Claim appears to use knowledge not found in provided CONTEXT (flag as unsupported)
 
 ### Step 3: Calculate Objective Metrics
 - **Recall** = (Facts correctly included) / (Total relevant facts)
@@ -310,9 +318,9 @@ Create an improved answer that:
 ## CRITICAL EVALUATION RULES
 
 1. **NO FALSE POSITIVES**: Only flag content as "missing" if it's genuinely absent, not just phrased differently
-2. **COMPREHENSIVE RECALL**: Include ALL relevant facts from context, especially ensuring complete coverage of multi-jurisdictional scenarios - each jurisdiction must be fully represented
+2. **COMPREHENSIVE RECALL** (RAG-Only): Include ALL relevant facts from provided CONTEXT, especially ensuring complete coverage of multi-jurisdictional scenarios - each jurisdiction in the provided sources must be fully represented. Never supplement with external legal knowledge.
 3. **PRECISE CITATIONS**: Every factual claim must have exact source reference
-4. **NEGATIVE CLAIMS**: Only state "no X exists" if explicitly stated in sources
+4. **NEGATIVE CLAIMS** (RAG-Only): Only state "no X exists" if explicitly stated in the provided CONTEXT sources. If a topic is not addressed in the provided documents, state "The provided sources do not address..."
 
 ## OUTPUT FORMAT
 
@@ -344,7 +352,12 @@ Provide a JSON response with this exact structure:
 }
 ```
 
-Be extremely careful to avoid false positives in your missing_facts list. Only include facts that are genuinely absent from the draft.
+**CRITICAL RAG-ONLY RULES:**
+- Only use facts that appear in the provided CONTEXT documents
+- Never supplement with external legal knowledge or assumptions
+- Be extremely careful to avoid false positives in missing_facts list
+- Only include facts that are: (1) present in provided CONTEXT and (2) genuinely absent from the draft
+- If unsure whether a fact is in the context, re-read the SOURCE documents carefully
 """
 
 def chat(question: str, client: AzureOpenAI, config: dict) -> str:
