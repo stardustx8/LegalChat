@@ -137,7 +137,7 @@ def retrieve(query: str, iso_codes: list[str], client: AzureOpenAI, config: dict
             }
         ],
         "filter": filter_str,
-        "select": "chunk,iso_code,id,chunk_index",
+        "select": "chunk,iso_code,id",
     }
     
     logging.info(f"DEBUG: Sending search request to {search_url}")
