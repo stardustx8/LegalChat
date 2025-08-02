@@ -377,7 +377,12 @@ def chat(question: str, client: AzureOpenAI, config: dict) -> str:
         # --- Step 2: Grade and Refine Answer ---
         logging.info("DEBUG: Step 6 - Calling OpenAI for refining...")
         refiner_user_message = f"""CONTEXT:\n{context}\n\nQUESTION: {question}\n\nDRAFT_ANSWER:\n{draft_with_header}"""
-        logging.info(f"DEBUG: Refiner message length: {len(refiner_user_message)} characters")
+        # Log length but avoid logging full content to prevent context overflow
+        logging.info(f"DEBUG: Refiner message length: {len(refiner_user_message)} characters, context chunks: {len(chunks)}")
+        
+        # Warn if message is getting very large
+        if len(refiner_user_message) > 50000:
+            logging.warning(f"DEBUG: Large refiner message ({len(refiner_user_message)} chars) may exceed model context window")
 
         try:
             refine_resp = client.chat.completions.create(
