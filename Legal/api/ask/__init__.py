@@ -251,31 +251,84 @@ def build_response_header(iso_codes: list[str], found_iso_codes: set[str]) -> st
     return f"{main_header}\n\n{table}\n\n---\n\n"
 
 GRADER_REFINER_PROMPT = """
+You are a specialized legal document evaluator and refiner. Your task is to systematically evaluate a draft answer against source documents and produce an improved version.
+
+## EVALUATION METHODOLOGY (Industry Best Practice)
+
+### Step 1: Extract Ground Truth Facts
+From the CONTEXT documents, create a comprehensive inventory of ALL relevant legal facts:
+- Explicit rules and prohibitions
+- Exceptions and exemptions  
+- Procedural requirements
+- Definitions and classifications
+- Age limits, measurement criteria, etc.
+
+For each fact, note:
+- Exact source location (section reference)
+- Whether it directly answers the question
+- Whether it provides important context
+
+### Step 2: Systematic Draft Evaluation
+For EACH fact in your ground truth inventory:
+
+**RECALL CHECK**: Is this fact present in the draft?
+- ✅ PRESENT: Fact is clearly stated (may use different wording)
+- ❌ MISSING: Fact is completely absent
+- ⚠️ UNCLEAR: Fact is mentioned but lacks clarity/precision
+
+**PRECISION CHECK**: For each claim in the draft:
+- ✅ SUPPORTED: Claim has clear textual support in context
+- ❌ UNSUPPORTED: Claim lacks adequate source support
+- ⚠️ IMPRECISE: Citation exists but doesn't match claim content
+
+### Step 3: Calculate Objective Metrics
+- **Recall** = (Facts correctly included) / (Total relevant facts)
+- **Precision** = (Supported claims) / (Total claims made)
+- **F1 Score** = 2 × (Precision × Recall) / (Precision + Recall)
+
+### Step 4: Produce Refined Answer
+Create an improved answer that:
+- Includes ALL missing relevant facts from ground truth
+- Preserves all correct elements from the draft
+- Ensures every claim has proper source support
+- Uses precise citations: (KL {ISO-code} §section)
+
+## CRITICAL EVALUATION RULES
+
+1. **NO FALSE POSITIVES**: Only flag content as "missing" if it's genuinely absent, not just phrased differently
+2. **COMPREHENSIVE RECALL**: Include ALL relevant facts from context, not just the most obvious ones
+3. **PRECISE CITATIONS**: Every factual claim must have exact source reference
+4. **NEGATIVE CLAIMS**: Only state "no X exists" if explicitly stated in sources
+
+## OUTPUT FORMAT
+
+Provide a JSON response with this exact structure:
+
+```json
 {
-  "role": "grader_and_refiner_agent",
-  "private_thought_key": "internal_grading_and_refinement_process",
-
-  "goal": "First, critically evaluate a DRAFT_ANSWER against the provided CONTEXT. Second, produce a REFINED_ANSWER that corrects all identified flaws and perfectly adheres to the output format. The final output will contain both the evaluation and the refined answer for debugging.",
-
-  "workflow": [
-    { "step": "extract_salient_facts",
-      "action": "From the CONTEXT passages, compile a comprehensive list of every atomic factual element (statutory conditions, exceptions, numeric thresholds, penalties, etc.) that is directly relevant to the user's QUESTION. This list will serve as the ground truth for grading." },
-
-    { "step": "grade_draft",
-      "action": "Evaluate the DRAFT_ANSWER against the salient_facts list. Calculate and record the following:\n                 - missing_facts: [An array of salient facts that were NOT included in the draft].\n                 - unsupported_claims: [An array of claims from the draft that are NOT supported by the CONTEXT].\n                 - scores: {\n                     'recall': '(# salient facts present) / (total salient facts)',\n                     'precision': '(# supported claims) / (total claims)',\n                     'F1': 'Harmonic mean of recall and precision'\n                   }" },
-
-    { "step": "refine_answer",
-      "action": "Rewrite the DRAFT_ANSWER into a REFINED_ANSWER to achieve recall=1.0 and precision≈1.0.\n                 - Integrate all 'missing_facts' with correct citations.\n                 - Remove or rewrite all 'unsupported_claims' to be strictly grounded in the CONTEXT.\n                 - Adhere perfectly to the answer format: two sections ('TL;DR Summary', 'Detailed Explanation'), with every sentence cited." },
-
-    { "step": "finalize_output",
-      "action": "Produce a single JSON object with two keys: 'evaluation' and 'refined_answer'.\n                 - The 'evaluation' key will contain the full output of the 'grade_draft' step.\n                 - The 'refined_answer' key will contain ONLY the final, user-facing text of the refined answer." }
-  ],
-
-  "house_rules": {
-    "negative_claims": "A negative assertion (e.g., 'no age limit') must be supported by an explicit passage stating the absence. Otherwise, phrase it as 'The supplied sources do not address...' and give it NO citation.",
-    "citation_format": "(KL {ISO-code} §section)"
-  }
+  "evaluation": {
+    "ground_truth_facts": [
+      {"fact": "description", "source": "KL XX §Y.Z", "in_draft": true/false}
+    ],
+    "recall_analysis": {
+      "total_relevant_facts": N,
+      "facts_included": N,
+      "recall_score": 0.XX
+    },
+    "precision_analysis": {
+      "total_claims": N,
+      "supported_claims": N, 
+      "precision_score": 0.XX
+    },
+    "f1_score": 0.XX,
+    "missing_facts": ["list of genuinely missing facts"],
+    "unsupported_claims": ["list of claims lacking source support"]
+  },
+  "refined_answer": "Complete improved answer text with all facts and proper citations"
 }
+```
+
+Be extremely careful to avoid false positives in your missing_facts list. Only include facts that are genuinely absent from the draft.
 """
 
 def chat(question: str, client: AzureOpenAI, config: dict) -> str:
@@ -443,7 +496,25 @@ def chat(question: str, client: AzureOpenAI, config: dict) -> str:
 
         # --- Step 2: Grade and Refine Answer ---
         logging.info("DEBUG: Step 6 - Calling OpenAI for refining...")
-        refiner_user_message = f"""CONTEXT:\n{context}\n\nQUESTION: {question}\n\nDRAFT_ANSWER:\n{draft_with_header}"""
+        refiner_user_message = f"""
+QUESTION:
+{question}
+
+CONTEXT DOCUMENTS:
+{context}
+
+DRAFT ANSWER TO EVALUATE:
+{draft_answer}
+
+Apply the systematic evaluation methodology to:
+1. Extract all relevant legal facts from the context
+2. Check which facts are present/missing in the draft
+3. Verify source support for all draft claims
+4. Calculate objective recall/precision metrics
+5. Produce a comprehensive refined answer
+
+Be extremely precise - only flag content as "missing" if genuinely absent, not just differently worded.
+"""
         logging.info(f"DEBUG: Refiner message length: {len(refiner_user_message)} characters")
 
         try:
