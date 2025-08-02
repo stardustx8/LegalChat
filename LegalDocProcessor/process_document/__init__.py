@@ -179,24 +179,40 @@ def main(myblob: func.InputStream):
 
         # Generate embeddings and prepare documents for upload
         docs_to_upload = []
+        failed_chunks = 0
+        
         for i, chunk in enumerate(chunks):
-            # Make direct REST API call to Azure OpenAI
-            payload = {
-                "input": chunk
-            }
-            response = requests.post(openai_url, headers=openai_headers, json=payload)
-            response.raise_for_status()
-            embedding_data = response.json()
-            embedding = embedding_data['data'][0]['embedding']
-            
-            doc = {
-                "id": f"{iso_code}-{i}",
-                "chunk": chunk,
-                "embedding": embedding,
-                "iso_code": iso_code,
-                "chunk_index": i  # For pinpoint citations
-            }
-            docs_to_upload.append(doc)
+            try:
+                # Make direct REST API call to Azure OpenAI
+                payload = {
+                    "input": chunk
+                }
+                response = requests.post(openai_url, headers=openai_headers, json=payload)
+                response.raise_for_status()
+                embedding_data = response.json()
+                embedding = embedding_data['data'][0]['embedding']
+                
+                doc = {
+                    "id": f"{iso_code}-{i}",
+                    "chunk": chunk,
+                    "embedding": embedding,
+                    "iso_code": iso_code,
+                    "chunk_index": i  # For pinpoint citations
+                }
+                docs_to_upload.append(doc)
+                
+            except Exception as e:
+                failed_chunks += 1
+                logging.error(f"Failed to generate embedding for chunk {i}: {e}")
+                if hasattr(e, 'response') and e.response is not None:
+                    logging.error(f"Response status: {e.response.status_code}")
+                    logging.error(f"Response content: {e.response.text}")
+                continue  # Skip this chunk and continue with the next one
+        
+        if failed_chunks > 0:
+            logging.warning(f"Failed to process {failed_chunks} out of {len(chunks)} chunks")
+        
+        logging.info(f"Successfully prepared {len(docs_to_upload)} documents for upload")
 
         if docs_to_upload:
             logging.info(f"Uploading {len(docs_to_upload)} new documents to the search index.")
