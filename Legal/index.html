@@ -621,29 +621,216 @@
     </div>
 
     <script>
-        const askButton = document.getElementById('askButton');
-        const questionInput = document.getElementById('question');
-        const responseArea = document.getElementById('response-area');
-        const fullJsonResponseDiv = document.getElementById('full-json-response');
-        const countryHeaderContainer = document.getElementById('country-header-container');
-        const refinedAnswerContainer = document.getElementById('refined-answer-container');
+        // Global variables for document management
+        let documentStatus = [];
+        let selectedDocuments = new Set();
         
-        // Document management elements
-        const countrySelect = document.getElementById('countrySelect');
-        const deleteButton = document.getElementById('deleteButton');
-        const deleteStatus = document.getElementById('deleteStatus');
-
-        askButton.addEventListener('click', async () => {
-            const question = questionInput.value.trim();
-            if (!question) {
-                alert('Please enter a question.');
+        // Global functions - accessible from onclick handlers
+        function openDocumentManagement() {
+            console.log('DEBUG: openDocumentManagement() called');
+            const modal = document.getElementById('documentManagementModal');
+            console.log('DEBUG: Modal element found:', modal);
+            
+            if (!modal) {
+                console.error('ERROR: documentManagementModal not found in DOM');
+                alert('Error: Document management modal not found. Please refresh the page.');
                 return;
             }
+            
+            console.log('DEBUG: Setting modal display to block');
+            modal.style.display = 'block';
+            console.log('DEBUG: Modal display set, calling loadDocumentStatus()');
+            loadDocumentStatus();
+        }
+        
+        function closeDocumentManagement() {
+            console.log('DEBUG: closeDocumentManagement() called');
+            const modal = document.getElementById('documentManagementModal');
+            if (modal) {
+                modal.style.display = 'none';
+                console.log('DEBUG: Modal closed');
+            }
+        }
+        
+        // Document Status Management
+        async function loadDocumentStatus() {
+            console.log('DEBUG: loadDocumentStatus() called');
+            try {
+                console.log('DEBUG: Showing loading status');
+                showModalStatus('Loading document status...', 'info');
+                
+                console.log('DEBUG: Fetching /api/document_status');
+                const response = await fetch('/api/document_status');
+                console.log('DEBUG: Response status:', response.status);
+                console.log('DEBUG: Response headers:', Object.fromEntries(response.headers.entries()));
+                
+                if (response.ok) {
+                    console.log('DEBUG: Response OK, parsing JSON');
+                    const result = await response.json();
+                    console.log('DEBUG: API result:', result);
+                    
+                    if (result.success) {
+                        console.log('DEBUG: Success, updating document status array');
+                        documentStatus = result.document_status;
+                        console.log('DEBUG: Document status array:', documentStatus);
+                        
+                        console.log('DEBUG: Updating status summary');
+                        updateStatusSummary(result);
+                        
+                        console.log('DEBUG: Rendering document list');
+                        renderDocumentList();
+                        
+                        console.log('DEBUG: Clearing status message');
+                        showModalStatus('', '');
+                    } else {
+                        console.error('ERROR: API returned success=false:', result.message);
+                        showModalStatus(`Error loading status: ${result.message}`, 'error');
+                    }
+                } else {
+                    console.error('ERROR: HTTP response not OK:', response.status);
+                    const errorText = await response.text();
+                    console.error('ERROR: Response text:', errorText);
+                    showModalStatus(`Failed to load document status: ${errorText}`, 'error');
+                }
+            } catch (error) {
+                console.error('ERROR: Exception in loadDocumentStatus:', error);
+                showModalStatus(`Error loading document status: ${error.message}`, 'error');
+            }
+        }
+        
+        function updateStatusSummary(result) {
+            console.log('DEBUG: updateStatusSummary() called with:', result);
+            const summary = document.getElementById('statusSummary');
+            if (summary) {
+                summary.innerHTML = `
+                    <strong>Document Overview:</strong> 
+                    ${result.available_count} Available • 
+                    ${result.missing_count} Missing • 
+                    ${result.total_countries} Total Countries
+                `;
+                console.log('DEBUG: Status summary updated');
+            } else {
+                console.error('ERROR: statusSummary element not found');
+            }
+        }
+        
+        function renderDocumentList() {
+            console.log('DEBUG: renderDocumentList() called');
+            const listContainer = document.getElementById('documentList');
+            
+            if (!listContainer) {
+                console.error('ERROR: documentList element not found');
+                return;
+            }
+            
+            if (documentStatus.length === 0) {
+                console.log('DEBUG: No document status available');
+                listContainer.innerHTML = '<p>No document status available.</p>';
+                return;
+            }
+            
+            console.log('DEBUG: Rendering', documentStatus.length, 'documents');
+            const listHTML = documentStatus.map(doc => {
+                const isSelected = selectedDocuments.has(doc.iso_code);
+                const statusClass = `status-${doc.status}`;
+                
+                let actions = '';
+                if (doc.status === 'missing') {
+                    actions = `<button class="action-btn upload-btn" onclick="uploadForCountry('${doc.iso_code}')">Upload</button>`;
+                } else if (doc.status === 'available') {
+                    actions = `
+                        <button class="action-btn replace-btn" onclick="replaceForCountry('${doc.iso_code}')">Replace</button>
+                        <button class="action-btn delete-btn" onclick="deleteForCountry('${doc.iso_code}')">Delete</button>
+                    `;
+                } else if (doc.status === 'indexed_only') {
+                    actions = `
+                        <button class="action-btn upload-btn" onclick="uploadForCountry('${doc.iso_code}')">Upload</button>
+                        <button class="action-btn delete-btn" onclick="deleteForCountry('${doc.iso_code}')">Delete</button>
+                    `;
+                } else if (doc.status === 'processing') {
+                    actions = `<span class="processing-text">Processing...</span>`;
+                }
+                
+                return `
+                    <div class="document-item ${isSelected ? 'selected' : ''}">
+                        <input type="checkbox" class="doc-checkbox" 
+                               ${isSelected ? 'checked' : ''}
+                               onchange="toggleDocumentSelection('${doc.iso_code}')">
+                        <div class="doc-info">
+                            <div class="doc-country">${doc.country_name} (${doc.iso_code})</div>
+                            <div class="doc-status">
+                                <span class="status-badge ${statusClass}">${doc.status_text}</span>
+                                <div class="doc-actions">${actions}</div>
+                            </div>
+                        </div>
+                    </div>
+                `;
+            }).join('');
+            
+            listContainer.innerHTML = listHTML;
+            console.log('DEBUG: Document list rendered successfully');
+        }
+        
+        function showModalStatus(message, type) {
+            console.log('DEBUG: showModalStatus called:', message, type);
+            const statusEl = document.getElementById('modalStatus');
+            if (statusEl) {
+                statusEl.textContent = message;
+                statusEl.className = `status-message ${type}`;
+                console.log('DEBUG: Modal status updated');
+            } else {
+                console.error('ERROR: modalStatus element not found');
+            }
+        }
+        
+        // Placeholder functions for individual actions
+        function uploadForCountry(isoCode) {
+            console.log('DEBUG: uploadForCountry called for:', isoCode);
+            alert(`Upload functionality for ${isoCode} - Coming soon!`);
+        }
+        
+        function replaceForCountry(isoCode) {
+            console.log('DEBUG: replaceForCountry called for:', isoCode);
+            alert(`Replace functionality for ${isoCode} - Coming soon!`);
+        }
+        
+        function deleteForCountry(isoCode) {
+            console.log('DEBUG: deleteForCountry called for:', isoCode);
+            alert(`Delete functionality for ${isoCode} - Coming soon!`);
+        }
+        
+        function toggleDocumentSelection(isoCode) {
+            console.log('DEBUG: toggleDocumentSelection called for:', isoCode);
+            if (selectedDocuments.has(isoCode)) {
+                selectedDocuments.delete(isoCode);
+            } else {
+                selectedDocuments.add(isoCode);
+            }
+            renderDocumentList();
+        }
+        
+        // Initialize when DOM is ready
+        document.addEventListener('DOMContentLoaded', function() {
+            console.log('DEBUG: DOMContentLoaded event fired');
+            const askButton = document.getElementById('askButton');
+            const questionInput = document.getElementById('question');
+            const responseArea = document.getElementById('response-area');
+            const fullJsonResponseDiv = document.getElementById('full-json-response');
+            const countryHeaderContainer = document.getElementById('country-header-container');
+            const refinedAnswerContainer = document.getElementById('refined-answer-container');
+            
+            console.log('DEBUG: Setting up askButton event listener');
+            askButton.addEventListener('click', async () => {
+                const question = questionInput.value.trim();
+                if (!question) {
+                    alert('Please enter a question.');
+                    return;
+                }
 
-            // Disable button and show loading state
-            askButton.disabled = true;
-            askButton.textContent = 'Thinking...';
-            responseArea.classList.remove('hidden');
+                // Disable button and show loading state
+                askButton.disabled = true;
+                askButton.textContent = 'Thinking...';
+                responseArea.classList.remove('hidden');
             fullJsonResponseDiv.textContent = 'Please wait, fetching the answer...';
             refinedAnswerContainer.innerHTML = '';
 
@@ -659,6 +846,8 @@
                 if (response.ok) {
                     const data = await response.json(); // Parse the JSON response
                     
+                    console.log('DEBUG: API result:', data);
+
                     // Display the full raw JSON for debugging
                     fullJsonResponseDiv.textContent = JSON.stringify(data, null, 2);
 
@@ -677,10 +866,13 @@
                     }
                 } else {
                     const errorText = await response.text();
+                    console.error('ERROR: HTTP response not OK:', response.status);
+                    console.error('ERROR: Response text:', errorText);
                     fullJsonResponseDiv.textContent = `An error occurred: ${errorText}`;
                     refinedAnswerContainer.innerHTML = ''; // Clear the refined answer area
                 }
             } catch (error) {
+                console.error('ERROR: Exception in askButton event listener:', error);
                 fullJsonResponseDiv.textContent = 'Failed to fetch the answer. Please check your connection and try again.';
                 countryHeaderContainer.innerHTML = '';
                 refinedAnswerContainer.innerHTML = '';
@@ -691,35 +883,27 @@
             }
         });
         
-        // Initialize document management
-        setupFileUpload();
-        
-        // Modal event listeners
-        const modal = document.getElementById('documentManagementModal');
-        const closeButtons = modal.querySelectorAll('.close');
-        
-        closeButtons.forEach(btn => {
-            btn.onclick = closeDocumentManagement;
-        });
-        
-        // Close modal when clicking outside
-        window.onclick = (event) => {
-            if (event.target === modal) {
-                closeDocumentManagement();
+            // Complete the askButton event listener and close DOMContentLoaded
+            });
+            
+            // Initialize document management modal event listeners
+            const modal = document.getElementById('documentManagementModal');
+            if (modal) {
+                const closeButtons = modal.querySelectorAll('.close');
+                closeButtons.forEach(btn => {
+                    btn.onclick = closeDocumentManagement;
+                });
+                
+                // Close modal when clicking outside
+                window.onclick = (event) => {
+                    if (event.target === modal) {
+                        closeDocumentManagement();
+                    }
+                };
             }
-        };
-        
-        // Bulk operation event listeners
-        document.getElementById('refreshStatusBtn').onclick = loadDocumentStatus;
-        document.getElementById('selectAllBtn').onclick = selectAllDocuments;
-        document.getElementById('selectNoneBtn').onclick = selectNoDocuments;
-        document.getElementById('selectAvailableBtn').onclick = selectAvailableDocuments;
-        document.getElementById('selectMissingBtn').onclick = selectMissingDocuments;
-        document.getElementById('bulkDeleteBtn').onclick = bulkDeleteDocuments;
-        document.getElementById('bulkReplaceBtn').onclick = () => {
-            // Bulk replace - trigger file input for multiple files
-            document.getElementById('fileInput').click();
-        };
+            
+            console.log('DEBUG: Document management initialization complete');
+        });
         
         // Helper function to show status messages
         function showStatus(message, type) {
