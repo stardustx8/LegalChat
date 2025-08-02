@@ -489,7 +489,9 @@ def chat(question: str, client: AzureOpenAI, config: dict) -> str:
         
         context = "\n\n---\n\n".join(structured_context)
         logging.info(f"DEBUG: Structured context built with {len(chunks)} sources, {len(context)} characters")
-        logging.info(f"DEBUG: Sources by jurisdiction: {[f'KL {chunk["iso_code"]}' for chunk in chunks]}")
+        # Build jurisdiction list for logging
+        jurisdiction_list = [f"KL {chunk['iso_code']}" for chunk in chunks]
+        logging.info(f"DEBUG: Sources by jurisdiction: {jurisdiction_list}")
         logging.info(f"DEBUG: Jurisdiction-aware evaluation will expect comprehensive coverage of: {iso_codes}")
         
         # --- Step 1: Draft Answer ---
