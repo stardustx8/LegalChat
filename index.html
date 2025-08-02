@@ -1,0 +1,191 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Legal RAG Assistant</title>
+        <script src="js/marked.min.js"></script>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            background-color: #f4f7f9;
+            color: #333;
+            margin: 0;
+            padding: 2rem;
+            display: flex;
+            justify-content: center;
+        }
+        .container {
+            max-width: 800px;
+            width: 100%;
+            background: #fff;
+            padding: 2rem;
+            border-radius: 8px;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+        }
+        h1 {
+            color: #1a2b4d;
+            text-align: center;
+            margin-bottom: 2rem;
+        }
+        textarea {
+            width: 100%;
+            padding: 1rem;
+            font-size: 1rem;
+            border-radius: 4px;
+            border: 1px solid #dcdcdc;
+            box-sizing: border-box;
+            resize: vertical;
+            min-height: 100px;
+        }
+        button {
+            display: block;
+            width: 100%;
+            padding: 1rem;
+            margin-top: 1rem;
+            font-size: 1rem;
+            font-weight: bold;
+            color: #fff;
+            background-color: #b10034;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            transition: background-color 0.2s;
+        }
+        button:disabled {
+            background-color: #a0a0a0;
+            cursor: not-allowed;
+        }
+        button:hover:not(:disabled) {
+            background-color: #8a0029; /* Darker shade for hover */
+        }
+        #response {
+            margin-top: 2rem;
+            padding: 1.5rem;
+            background-color: #f9f9f9;
+            border: 1px solid #e1e1e1;
+            border-radius: 4px;
+            line-height: 1.6;
+        }
+        #response table {
+            border-collapse: collapse;
+            margin-bottom: 1rem;
+            width: auto;
+        }
+        #response th, #response td {
+            border: 1px solid #ddd;
+            padding: 8px;
+            text-align: center;
+        }
+        #response td:first-child, #response th:first-child {
+            text-align: left;
+        }
+
+        /* Specific styles for the country header table */
+        #country-header-container table {
+            border-collapse: collapse;
+            margin: 1.5rem auto; /* Center the table and add vertical margin */
+            width: auto;
+            border-style: hidden; /* Hide the outer border */
+        }
+        #country-header-container th,
+        #country-header-container td {
+            border: 1px solid #ddd; /* Create the inner grid lines */
+            padding: 8px 16px;
+            text-align: center;
+        }
+        #response h1, #response h2, #response h3 {
+            margin-top: 1.5rem;
+            margin-bottom: 1rem;
+        }
+        .hidden {
+            display: none;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Legal RAG Assistant</h1>
+        <textarea id="question" placeholder="Ask a question about knife legislation..."></textarea>
+        <button id="askButton">Answer</button>
+        <div id="response-area" class="hidden">
+            <details>
+                <summary>Show Full Debug Output</summary>
+                <h2>Full JSON Response</h2>
+                <pre id="full-json-response"></pre>
+            </details>
+            <hr>
+            <div id="country-header-container"></div>
+            <h2>Refined Answer</h2>
+            <div id="refined-answer-container"></div>
+        </div>
+    </div>
+
+    <script>
+        const askButton = document.getElementById('askButton');
+        const questionInput = document.getElementById('question');
+        const responseArea = document.getElementById('response-area');
+        const fullJsonResponseDiv = document.getElementById('full-json-response');
+        const countryHeaderContainer = document.getElementById('country-header-container');
+        const refinedAnswerContainer = document.getElementById('refined-answer-container');
+
+        askButton.addEventListener('click', async () => {
+            const question = questionInput.value.trim();
+            if (!question) {
+                alert('Please enter a question.');
+                return;
+            }
+
+            // Disable button and show loading state
+            askButton.disabled = true;
+            askButton.textContent = 'Thinking...';
+            responseArea.classList.remove('hidden');
+            fullJsonResponseDiv.textContent = 'Please wait, fetching the answer...';
+            refinedAnswerContainer.innerHTML = '';
+
+            try {
+                const response = await fetch('/api/ask', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({ question })
+                });
+
+                if (response.ok) {
+                    const data = await response.json(); // Parse the JSON response
+                    
+                    // Display the full raw JSON for debugging
+                    fullJsonResponseDiv.textContent = JSON.stringify(data, null, 2);
+
+                    // Display the country header
+                    if (data && data.country_header) {
+                        countryHeaderContainer.innerHTML = marked.parse(data.country_header);
+                    } else {
+                        countryHeaderContainer.innerHTML = ''; // Clear it if not present
+                    }
+
+                    // Render the refined answer markdown into its container
+                    if (data && data.refined_answer) {
+                        refinedAnswerContainer.innerHTML = marked.parse(data.refined_answer);
+                    } else {
+                        refinedAnswerContainer.textContent = 'No refined answer found in the response.';
+                    }
+                } else {
+                    const errorText = await response.text();
+                    fullJsonResponseDiv.textContent = `An error occurred: ${errorText}`;
+                    refinedAnswerContainer.innerHTML = ''; // Clear the refined answer area
+                }
+            } catch (error) {
+                fullJsonResponseDiv.textContent = 'Failed to fetch the answer. Please check your connection and try again.';
+                countryHeaderContainer.innerHTML = '';
+                refinedAnswerContainer.innerHTML = '';
+            } finally {
+                // Re-enable button
+                askButton.disabled = false;
+                askButton.textContent = 'Answer';
+            }
+        });
+    </script>
+</body>
+</html>
