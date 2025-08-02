@@ -255,22 +255,35 @@ You are a specialized legal document evaluator and refiner. Your task is to syst
 
 ## EVALUATION METHODOLOGY (Industry Best Practice)
 
-### Step 1: Extract Ground Truth Facts
-From the CONTEXT documents (each marked as **SOURCE N: KL XX**), create a comprehensive inventory of ALL relevant legal facts:
+### Step 1: Extract Ground Truth Facts (Jurisdiction-Aware)
+From the CONTEXT documents (each marked as **SOURCE N: KL XX**), create a comprehensive inventory of ALL relevant legal facts.
+
+**CRITICAL: For multi-jurisdictional queries, ensure COMPLETE coverage from ALL jurisdictions:**
+- If query involves multiple countries/jurisdictions, extract facts from EACH jurisdiction separately
+- For cross-border scenarios (e.g., EuroAirport, international travel), include:
+  - Country-specific regulations from each jurisdiction
+  - International/EU rules that apply
+  - Transit/border-crossing specific rules
+  - Conflict resolution between jurisdictions
+
+**Extract these fact types from EACH relevant jurisdiction:**
 - Explicit rules and prohibitions
 - Exceptions and exemptions  
 - Procedural requirements
 - Definitions and classifications
 - Age limits, measurement criteria, etc.
+- Cross-border/international provisions
 
-For each fact, note:
+**For each fact, note:**
 - Exact source reference (SOURCE N: KL XX format from context)
+- Which jurisdiction(s) it applies to
 - Whether it directly answers the question
 - Whether it provides important context
 - The specific text passage that supports this fact
+- How it interacts with other jurisdictions' rules
 
-### Step 2: Systematic Draft Evaluation
-For EACH fact in your ground truth inventory:
+### Step 2: Systematic Draft Evaluation (Multi-Jurisdictional)
+For EACH fact in your ground truth inventory (ensuring complete coverage of ALL jurisdictions):
 
 **RECALL CHECK**: Is this fact present in the draft?
 - ✅ PRESENT: Fact is clearly stated (may use different wording)
@@ -297,7 +310,7 @@ Create an improved answer that:
 ## CRITICAL EVALUATION RULES
 
 1. **NO FALSE POSITIVES**: Only flag content as "missing" if it's genuinely absent, not just phrased differently
-2. **COMPREHENSIVE RECALL**: Include ALL relevant facts from context, not just the most obvious ones
+2. **COMPREHENSIVE RECALL**: Include ALL relevant facts from context, especially ensuring complete coverage of multi-jurisdictional scenarios - each jurisdiction must be fully represented
 3. **PRECISE CITATIONS**: Every factual claim must have exact source reference
 4. **NEGATIVE CLAIMS**: Only state "no X exists" if explicitly stated in sources
 
@@ -314,7 +327,9 @@ Provide a JSON response with this exact structure:
     "recall_analysis": {
       "total_relevant_facts": N,
       "facts_included": N,
-      "recall_score": 0.XX
+      "recall_score": 0.XX,
+      "jurisdictions_covered": ["list of jurisdictions with facts included"],
+      "jurisdictions_missing": ["list of jurisdictions with missing facts"]
     },
     "precision_analysis": {
       "total_claims": N,
@@ -358,7 +373,8 @@ def chat(question: str, client: AzureOpenAI, config: dict) -> str:
             # Minimum 10 per country, but cap at reasonable limit
             retrieval_k = min(len(iso_codes) * 10, 50)
         
-        logging.info(f"DEBUG: Using dynamic k={retrieval_k} for {len(iso_codes)} countries")
+        logging.info(f"DEBUG: Using dynamic k={retrieval_k} for {len(iso_codes)} countries: {iso_codes}")
+        logging.info(f"DEBUG: Multi-jurisdictional query detected: {len(iso_codes) > 1}")
         chunks = retrieve(question, iso_codes, client, config, k=retrieval_k)
         logging.info(f"DEBUG: Retrieved {len(chunks)} chunks")
 
@@ -473,6 +489,8 @@ def chat(question: str, client: AzureOpenAI, config: dict) -> str:
         
         context = "\n\n---\n\n".join(structured_context)
         logging.info(f"DEBUG: Structured context built with {len(chunks)} sources, {len(context)} characters")
+        logging.info(f"DEBUG: Sources by jurisdiction: {[f'KL {chunk["iso_code"]}' for chunk in chunks]}")
+        logging.info(f"DEBUG: Jurisdiction-aware evaluation will expect comprehensive coverage of: {iso_codes}")
         
         # --- Step 1: Draft Answer ---
         logging.info("DEBUG: Step 4 - Calling OpenAI for draft answer...")
@@ -569,6 +587,14 @@ Be extremely precise - only flag content as "missing" if genuinely absent, not j
             logging.info(f"DEBUG: Missing facts count: {len(missing_facts)}")
             logging.info(f"DEBUG: Unsupported claims count: {len(unsupported_claims)}")
             
+            # Log jurisdiction coverage for multi-country queries
+            if 'recall_analysis' in evaluation:
+                jurisdictions_covered = evaluation['recall_analysis'].get('jurisdictions_covered', [])
+                jurisdictions_missing = evaluation['recall_analysis'].get('jurisdictions_missing', [])
+                logging.info(f"DEBUG: Jurisdictions covered: {jurisdictions_covered}")
+                logging.info(f"DEBUG: Jurisdictions missing facts: {jurisdictions_missing}")
+                logging.info(f"DEBUG: Multi-jurisdictional coverage: {len(jurisdictions_covered)} covered, {len(jurisdictions_missing)} incomplete")
+            
             # Get the refined answer (should already include header since we evaluated draft_with_header)
             answer = refined_data.get('refined_answer', '')
             logging.info("DEBUG: Systematic evaluation JSON parsing successful")
@@ -589,11 +615,15 @@ Be extremely precise - only flag content as "missing" if genuinely absent, not j
 
         logging.info("DEBUG: Step 8 - Building final systematic evaluation response")
         # Return the complete evaluation data for debugging and quality monitoring
+        evaluation_data = refined_data.get('evaluation', {})
         final_response = {
             "refined_answer": answer,
-            "evaluation_metrics": refined_data.get('evaluation', {}),
+            "evaluation_metrics": evaluation_data,
             "country_header_included": True,
-            "systematic_evaluation": True
+            "systematic_evaluation": True,
+            "jurisdiction_aware_evaluation": True,
+            "detected_countries": iso_codes,
+            "sources_count": len(chunks)
         }
         
         logging.info("DEBUG: Systematic evaluation pipeline completed")
