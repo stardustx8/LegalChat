@@ -193,7 +193,8 @@ def main(myblob: func.InputStream):
                 "id": f"{iso_code}-{i}",
                 "chunk": chunk,
                 "embedding": embedding,
-                "iso_code": iso_code
+                "iso_code": iso_code,
+                "chunk_index": i  # For pinpoint citations
             }
             docs_to_upload.append(doc)
 
