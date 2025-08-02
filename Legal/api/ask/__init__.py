@@ -306,7 +306,7 @@ def chat(question: str, client: AzureOpenAI, config: dict) -> str:
 
         logging.info("DEBUG: Step 3 - Preparing context and drafting")
         drafter_system_message = """
-r{
+{
   "role": "expert_legal_research_assistant",
   "private_thought_key": "internal_chain_of_thought",
 
