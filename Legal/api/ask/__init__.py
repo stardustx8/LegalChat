@@ -292,7 +292,20 @@ def chat(question: str, client: AzureOpenAI, config: dict) -> str:
             return "Could not determine a country from your query. Please be more specific."
 
         logging.info("DEBUG: Step 2 - Retrieving documents")
-        chunks = retrieve(question, iso_codes, client, config, k=5)
+        # Dynamic k strategy based on query complexity and country count
+        # Legal documents need higher k due to complexity and verbosity
+        base_k = 15  # Higher baseline for legal documents (vs typical k=4)
+        
+        if len(iso_codes) == 1:
+            # Single country: use base k
+            retrieval_k = base_k
+        else:
+            # Multi-country: scale up to ensure balanced representation
+            # Minimum 10 per country, but cap at reasonable limit
+            retrieval_k = min(len(iso_codes) * 10, 50)
+        
+        logging.info(f"DEBUG: Using dynamic k={retrieval_k} for {len(iso_codes)} countries")
+        chunks = retrieve(question, iso_codes, client, config, k=retrieval_k)
         logging.info(f"DEBUG: Retrieved {len(chunks)} chunks")
 
         if not chunks:
