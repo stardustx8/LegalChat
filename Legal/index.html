@@ -101,6 +101,83 @@
         .hidden {
             display: none;
         }
+        
+        /* Document Management Styles */
+        .document-management {
+            margin-top: 3rem;
+            padding: 2rem;
+            background-color: #f8f9fa;
+            border-radius: 8px;
+            border: 1px solid #e9ecef;
+        }
+        .document-management h2 {
+            color: #1a2b4d;
+            margin-bottom: 1.5rem;
+            text-align: center;
+        }
+        .document-management h3 {
+            color: #495057;
+            margin-bottom: 0.5rem;
+        }
+        .document-management p {
+            color: #6c757d;
+            margin-bottom: 1rem;
+            font-size: 0.9rem;
+        }
+        .delete-controls {
+            display: flex;
+            gap: 1rem;
+            align-items: center;
+            margin-bottom: 1rem;
+        }
+        .delete-controls select {
+            flex: 1;
+            padding: 0.75rem;
+            font-size: 1rem;
+            border: 1px solid #dcdcdc;
+            border-radius: 4px;
+            background-color: white;
+        }
+        .delete-btn {
+            background-color: #dc3545;
+            color: white;
+            border: none;
+            padding: 0.75rem 1.5rem;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 1rem;
+            font-weight: bold;
+            transition: background-color 0.2s;
+            white-space: nowrap;
+        }
+        .delete-btn:hover:not(:disabled) {
+            background-color: #c82333;
+        }
+        .delete-btn:disabled {
+            background-color: #6c757d;
+            cursor: not-allowed;
+        }
+        .status-message {
+            padding: 0.75rem;
+            border-radius: 4px;
+            font-size: 0.9rem;
+            margin-top: 0.5rem;
+        }
+        .status-message.success {
+            background-color: #d4edda;
+            color: #155724;
+            border: 1px solid #c3e6cb;
+        }
+        .status-message.error {
+            background-color: #f8d7da;
+            color: #721c24;
+            border: 1px solid #f5c6cb;
+        }
+        .status-message.info {
+            background-color: #d1ecf1;
+            color: #0c5460;
+            border: 1px solid #bee5eb;
+        }
     </style>
 </head>
 <body>
@@ -108,6 +185,41 @@
         <h1>Legal RAG Assistant</h1>
         <textarea id="question" placeholder="Ask a question about knife legislation..."></textarea>
         <button id="askButton">Answer</button>
+        
+        <!-- Document Management Section -->
+        <div class="document-management">
+            <h2>Document Management</h2>
+            <div class="management-controls">
+                <div class="delete-section">
+                    <h3>Delete Document</h3>
+                    <p>Remove a country's legal document from both storage and search index.</p>
+                    <div class="delete-controls">
+                        <select id="countrySelect">
+                            <option value="">Select Country...</option>
+                            <option value="AT">Austria (AT)</option>
+                            <option value="BE">Belgium (BE)</option>
+                            <option value="CH">Switzerland (CH)</option>
+                            <option value="CZ">Czech Republic (CZ)</option>
+                            <option value="DE">Germany (DE)</option>
+                            <option value="DK">Denmark (DK)</option>
+                            <option value="ES">Spain (ES)</option>
+                            <option value="FI">Finland (FI)</option>
+                            <option value="FR">France (FR)</option>
+                            <option value="GB">United Kingdom (GB)</option>
+                            <option value="IE">Ireland (IE)</option>
+                            <option value="IT">Italy (IT)</option>
+                            <option value="NL">Netherlands (NL)</option>
+                            <option value="NO">Norway (NO)</option>
+                            <option value="PL">Poland (PL)</option>
+                            <option value="PT">Portugal (PT)</option>
+                            <option value="SE">Sweden (SE)</option>
+                        </select>
+                        <button id="deleteButton" class="delete-btn">Delete Document</button>
+                    </div>
+                    <div id="deleteStatus" class="status-message"></div>
+                </div>
+            </div>
+        </div>
         <div id="response-area" class="hidden">
             <details>
                 <summary>Show Full Debug Output</summary>
@@ -128,6 +240,11 @@
         const fullJsonResponseDiv = document.getElementById('full-json-response');
         const countryHeaderContainer = document.getElementById('country-header-container');
         const refinedAnswerContainer = document.getElementById('refined-answer-container');
+        
+        // Document management elements
+        const countrySelect = document.getElementById('countrySelect');
+        const deleteButton = document.getElementById('deleteButton');
+        const deleteStatus = document.getElementById('deleteStatus');
 
         askButton.addEventListener('click', async () => {
             const question = questionInput.value.trim();
@@ -186,6 +303,114 @@
                 askButton.textContent = 'Answer';
             }
         });
+        
+        // Delete document functionality
+        deleteButton.addEventListener('click', async () => {
+            const selectedCountry = countrySelect.value;
+            if (!selectedCountry) {
+                showStatus('Please select a country to delete.', 'error');
+                return;
+            }
+            
+            // Confirm deletion
+            const countryName = countrySelect.options[countrySelect.selectedIndex].text;
+            if (!confirm(`Are you sure you want to delete the legal document for ${countryName}?\n\nThis will:\n• Remove ${selectedCountry}.docx from storage\n• Delete all ${selectedCountry} documents from the search index\n\nThis action cannot be undone.`)) {
+                return;
+            }
+            
+            // Disable button and show loading state
+            deleteButton.disabled = true;
+            deleteButton.textContent = 'Deleting...';
+            showStatus('Deleting document and cleaning up index...', 'info');
+            
+            try {
+                // Step 1: Delete from storage (call delete_blob API)
+                showStatus('Step 1/2: Deleting file from storage...', 'info');
+                const deleteFileResponse = await fetch('/api/delete_blob', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({ 
+                        container: 'legaldocsrag',
+                        filename: `${selectedCountry}.docx`
+                    })
+                });
+                
+                let fileDeleted = false;
+                if (deleteFileResponse.ok) {
+                    const fileResult = await deleteFileResponse.json();
+                    fileDeleted = fileResult.success;
+                    if (!fileDeleted) {
+                        console.warn('File deletion failed or file not found:', fileResult.message);
+                    }
+                } else {
+                    console.warn('File deletion API call failed:', deleteFileResponse.status);
+                }
+                
+                // Step 2: Clean up search index (always do this, even if file wasn't found)
+                showStatus('Step 2/2: Cleaning up search index...', 'info');
+                const cleanupResponse = await fetch('/api/cleanup_index', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({ iso_code: selectedCountry })
+                });
+                
+                if (cleanupResponse.ok) {
+                    const cleanupResult = await cleanupResponse.json();
+                    if (cleanupResult.success) {
+                        const deletedCount = cleanupResult.deleted_count;
+                        let message = `✅ Successfully deleted ${countryName} documents!\n`;
+                        
+                        if (fileDeleted) {
+                            message += `• File ${selectedCountry}.docx removed from storage\n`;
+                        } else {
+                            message += `• File ${selectedCountry}.docx was not found in storage\n`;
+                        }
+                        
+                        if (deletedCount > 0) {
+                            message += `• ${deletedCount} documents removed from search index`;
+                        } else {
+                            message += `• No documents found in search index to remove`;
+                        }
+                        
+                        showStatus(message, 'success');
+                        
+                        // Reset the country selection
+                        countrySelect.value = '';
+                    } else {
+                        showStatus(`❌ Index cleanup failed: ${cleanupResult.error || 'Unknown error'}`, 'error');
+                    }
+                } else {
+                    const errorText = await cleanupResponse.text();
+                    showStatus(`❌ Index cleanup failed: ${errorText}`, 'error');
+                }
+                
+            } catch (error) {
+                console.error('Delete operation failed:', error);
+                showStatus(`❌ Delete operation failed: ${error.message}`, 'error');
+            } finally {
+                // Re-enable button
+                deleteButton.disabled = false;
+                deleteButton.textContent = 'Delete Document';
+            }
+        });
+        
+        // Helper function to show status messages
+        function showStatus(message, type) {
+            deleteStatus.textContent = message;
+            deleteStatus.className = `status-message ${type}`;
+            deleteStatus.style.display = 'block';
+            
+            // Auto-hide success messages after 10 seconds
+            if (type === 'success') {
+                setTimeout(() => {
+                    deleteStatus.style.display = 'none';
+                }, 10000);
+            }
+        }
     </script>
 </body>
 </html>
