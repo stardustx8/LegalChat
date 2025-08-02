@@ -1,24 +1,41 @@
 import logging
 import os
 import re
+import json
 import azure.functions as func
 from azure.core.credentials import AzureKeyCredential
 from azure.search.documents import SearchClient
 
-def main(myblob: func.InputStream):
+def main(eventGridEvent: func.EventGridEvent):
     """
-    Azure Function triggered when a blob is deleted from the legaldocs-landing container.
+    Azure Function triggered by Event Grid when a blob is deleted from the legaldocsrag container.
     Automatically removes corresponding documents from the Azure Cognitive Search index.
     
     This completes the business-admin workflow:
     - Upload/Replace: Automatic processing and index update
     - Delete: Automatic index cleanup (this function)
     """
-    logging.info(f"Blob deletion trigger activated")
-    logging.info(f"Deleted blob name: {myblob.name}")
+    logging.info(f"Event Grid deletion trigger activated")
+    
+    # Parse Event Grid event
+    event_data = eventGridEvent.get_json()
+    logging.info(f"Event type: {eventGridEvent.event_type}")
+    logging.info(f"Event data: {json.dumps(event_data, indent=2)}")
+    
+    # Only process blob deletion events
+    if eventGridEvent.event_type != "Microsoft.Storage.BlobDeleted":
+        logging.info(f"Ignoring event type: {eventGridEvent.event_type}")
+        return
+    
+    # Extract blob URL from event data
+    blob_url = event_data.get('url', '')
+    logging.info(f"Deleted blob URL: {blob_url}")
+    
+    # Extract filename from URL
+    filename = blob_url.split('/')[-1]
+    logging.info(f"Deleted blob name: {filename}")
 
     # Extract ISO code from filename
-    filename = myblob.name.split('/')[-1]
     match = re.match(r"([A-Z]{2})\.docx", filename)
     if not match:
         logging.warning(f"Deleted file doesn't match expected format: {filename}. Expected 'XX.docx' where XX is a 2-letter ISO code.")
