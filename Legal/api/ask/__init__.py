@@ -256,7 +256,7 @@ You are a specialized legal document evaluator and refiner. Your task is to syst
 ## EVALUATION METHODOLOGY (Industry Best Practice)
 
 ### Step 1: Extract Ground Truth Facts
-From the CONTEXT documents, create a comprehensive inventory of ALL relevant legal facts:
+From the CONTEXT documents (each marked as **SOURCE N: KL XX**), create a comprehensive inventory of ALL relevant legal facts:
 - Explicit rules and prohibitions
 - Exceptions and exemptions  
 - Procedural requirements
@@ -264,9 +264,10 @@ From the CONTEXT documents, create a comprehensive inventory of ALL relevant leg
 - Age limits, measurement criteria, etc.
 
 For each fact, note:
-- Exact source location (section reference)
+- Exact source reference (SOURCE N: KL XX format from context)
 - Whether it directly answers the question
 - Whether it provides important context
+- The specific text passage that supports this fact
 
 ### Step 2: Systematic Draft Evaluation
 For EACH fact in your ground truth inventory:
@@ -291,7 +292,7 @@ Create an improved answer that:
 - Includes ALL missing relevant facts from ground truth
 - Preserves all correct elements from the draft
 - Ensures every claim has proper source support
-- Uses precise citations: (KL {ISO-code} §section)
+- Uses precise citations referencing the structured sources: (KL {ISO-code} from SOURCE N)
 
 ## CRITICAL EVALUATION RULES
 
@@ -308,7 +309,7 @@ Provide a JSON response with this exact structure:
 {
   "evaluation": {
     "ground_truth_facts": [
-      {"fact": "description", "source": "KL XX §Y.Z", "in_draft": true/false}
+      {"fact": "description", "source": "SOURCE N: KL XX", "in_draft": true/false, "supporting_text": "exact quote from context"}
     ],
     "recall_analysis": {
       "total_relevant_facts": N,
@@ -465,8 +466,13 @@ def chat(question: str, client: AzureOpenAI, config: dict) -> str:
   ]
 }
         """
-        context = "\n\n---\n\n".join([c['chunk'] for c in chunks])
-        logging.info(f"DEBUG: Context length: {len(context)} characters")
+        # Build structured context with source mapping for systematic evaluation
+        structured_context = []
+        for i, chunk in enumerate(chunks):
+            structured_context.append(f"**SOURCE {i+1}: KL {chunk['iso_code']} (Document Section)**\n{chunk['chunk']}")
+        
+        context = "\n\n---\n\n".join(structured_context)
+        logging.info(f"DEBUG: Structured context built with {len(chunks)} sources, {len(context)} characters")
         
         # --- Step 1: Draft Answer ---
         logging.info("DEBUG: Step 4 - Calling OpenAI for draft answer...")
@@ -504,7 +510,7 @@ CONTEXT DOCUMENTS:
 {context}
 
 DRAFT ANSWER TO EVALUATE:
-{draft_answer}
+{draft_with_header}
 
 Apply the systematic evaluation methodology to:
 1. Extract all relevant legal facts from the context
@@ -515,7 +521,15 @@ Apply the systematic evaluation methodology to:
 
 Be extremely precise - only flag content as "missing" if genuinely absent, not just differently worded.
 """
-        logging.info(f"DEBUG: Refiner message length: {len(refiner_user_message)} characters")
+        logging.info(f"DEBUG: Systematic evaluation message length: {len(refiner_user_message)} characters")
+        
+        # Conservative token limit for systematic evaluation with structured context
+        if len(refiner_user_message) > 40000:
+            logging.warning("DEBUG: Message too long for systematic evaluation, truncating context")
+            # Preserve source structure while truncating
+            context_lines = context.split('\n')
+            truncated_lines = context_lines[:int(len(context_lines) * 0.7)]  # Keep 70% of context
+            context = '\n'.join(truncated_lines) + "\n\n[Context truncated for systematic evaluation]"
 
         try:
             refine_resp = client.chat.completions.create(
@@ -533,30 +547,57 @@ Be extremely precise - only flag content as "missing" if genuinely absent, not j
             logging.error(f"DEBUG: Refine step failed: {refine_error}")
             raise
 
-        logging.info("DEBUG: Step 7 - Processing JSON response")
-        # For debugging, we return the full JSON. In production, you might extract just the 'refined_answer'.
-        # We add the header to the final refined answer text before packaging it up.
+        logging.info("DEBUG: Step 7 - Processing systematic evaluation JSON response")
         try:
             refined_data = json.loads(refined_output_json)
+            
+            # Extract evaluation metrics for logging and debugging
+            evaluation = refined_data.get('evaluation', {})
+            if 'recall_analysis' in evaluation:
+                recall_score = evaluation['recall_analysis'].get('recall_score', 'N/A')
+                logging.info(f"DEBUG: Evaluation recall score: {recall_score}")
+            if 'precision_analysis' in evaluation:
+                precision_score = evaluation['precision_analysis'].get('precision_score', 'N/A')
+                logging.info(f"DEBUG: Evaluation precision score: {precision_score}")
+            if 'f1_score' in evaluation:
+                f1_score = evaluation.get('f1_score', 'N/A')
+                logging.info(f"DEBUG: Evaluation F1 score: {f1_score}")
+            
+            # Log missing facts and unsupported claims for debugging
+            missing_facts = evaluation.get('missing_facts', [])
+            unsupported_claims = evaluation.get('unsupported_claims', [])
+            logging.info(f"DEBUG: Missing facts count: {len(missing_facts)}")
+            logging.info(f"DEBUG: Unsupported claims count: {len(unsupported_claims)}")
+            
+            # Get the refined answer (should already include header since we evaluated draft_with_header)
             answer = refined_data.get('refined_answer', '')
-            logging.info("DEBUG: JSON parsing successful")
+            logging.info("DEBUG: Systematic evaluation JSON parsing successful")
+            
         except json.JSONDecodeError as json_error:
-            logging.error(f"DEBUG: Failed to decode JSON from refiner model: {json_error}")
+            logging.error(f"DEBUG: Failed to decode systematic evaluation JSON: {json_error}")
             logging.error(f"DEBUG: Raw refiner output: {refined_output_json[:500]}...")
-            # Fallback to the draft answer if the refiner fails
+            # Fallback to the draft with header if the refiner fails
             refined_data = {
-                "evaluation": {"error": "Refiner output was not valid JSON.", "raw_output": refined_output_json},
-                "refined_answer": draft_answer 
+                "evaluation": {
+                    "error": "Systematic evaluation output was not valid JSON.", 
+                    "raw_output": refined_output_json,
+                    "fallback_used": True
+                },
+                "refined_answer": draft_with_header
             }
-            answer = draft_answer
+            answer = draft_with_header
 
-        logging.info("DEBUG: Step 8 - Building final response")
-        # For debugging, return the entire object as a JSON string.
-        # The 'answer' variable already contains the 'refined_answer' text.
-        refined_data['refined_answer'] = answer
-        refined_data['country_header'] = header  # Add the header to the response object
-        logging.info("DEBUG: Final JSON response prepared")
-        return json.dumps(refined_data, indent=2)
+        logging.info("DEBUG: Step 8 - Building final systematic evaluation response")
+        # Return the complete evaluation data for debugging and quality monitoring
+        final_response = {
+            "refined_answer": answer,
+            "evaluation_metrics": refined_data.get('evaluation', {}),
+            "country_header_included": True,
+            "systematic_evaluation": True
+        }
+        
+        logging.info("DEBUG: Systematic evaluation pipeline completed")
+        return json.dumps(final_response, indent=2)
         
     except Exception as e:
         logging.error(f"DEBUG: Chat function failed at some step: {e}", exc_info=True)
