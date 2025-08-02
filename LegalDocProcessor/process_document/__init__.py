@@ -13,21 +13,90 @@ from azure.search.documents import SearchClient
 
 # Simple text splitter function to avoid langchain dependency
 def simple_text_splitter(text, chunk_size=1000, chunk_overlap=200):
+    """Enhanced text splitter that preserves legal document structure.
+    
+    Prioritizes breaking at:
+    1. Double newlines (paragraph breaks)
+    2. Bullet points and numbered lists
+    3. Attachment boundaries
+    4. Sentence endings
+    5. Word boundaries (fallback)
+    """
     chunks = []
     start = 0
+    
     while start < len(text):
         end = start + chunk_size
-        if end < len(text):
-            # Find the last space within the chunk to avoid breaking words
-            while end > start and text[end] != ' ':
-                end -= 1
-            if end == start:  # No space found, use original end
-                end = start + chunk_size
-        chunk = text[start:end].strip()
+        
+        if end >= len(text):
+            # Last chunk
+            chunk = text[start:].strip()
+            if chunk:
+                chunks.append(chunk)
+            break
+            
+        # Find the best break point within the chunk
+        best_break = find_best_break_point(text, start, end)
+        
+        chunk = text[start:best_break].strip()
         if chunk:
             chunks.append(chunk)
-        start = end - chunk_overlap if end > chunk_overlap else end
+            
+        # Calculate next start with overlap, but avoid splitting mid-sentence
+        next_start = max(start + 1, best_break - chunk_overlap)
+        
+        # Adjust start to avoid breaking words or bullet points
+        while next_start < best_break and next_start < len(text):
+            if text[next_start] in ' \n\t' or text[next_start:next_start+2] in ['• ', '- ', '* ']:
+                break
+            if next_start > 0 and text[next_start-1:next_start+1] in ['. ', '! ', '? ']:
+                break
+            next_start += 1
+            
+        start = next_start
+        
     return chunks
+
+
+def find_best_break_point(text, start, max_end):
+    """Find the best point to break text while preserving legal document structure."""
+    # Look for break points in order of preference
+    search_start = max(start + 500, max_end - 300)  # Don't break too early
+    
+    # 1. Double newlines (paragraph breaks) - highest priority
+    for i in range(max_end - 1, search_start - 1, -1):
+        if text[i:i+2] == '\n\n':
+            return i + 2
+    
+    # 2. Attachment or section boundaries
+    for i in range(max_end - 10, search_start - 1, -1):
+        if any(pattern in text[i:i+20].lower() for pattern in 
+               ['attachment', 'section', 'article', 'chapter', 'annex']):
+            # Find the end of this line
+            line_end = text.find('\n', i)
+            if line_end != -1 and line_end <= max_end:
+                return line_end + 1
+    
+    # 3. Bullet points or numbered lists
+    for i in range(max_end - 1, search_start - 1, -1):
+        if text[i] == '\n' and i + 1 < len(text):
+            next_chars = text[i+1:i+4]
+            if (next_chars.startswith(('• ', '- ', '* ')) or 
+                (len(next_chars) >= 2 and next_chars[0].isdigit() and next_chars[1] in '. )')):
+                return i + 1
+    
+    # 4. Sentence endings
+    for i in range(max_end - 1, search_start - 1, -1):
+        if text[i] in '.!?' and i + 1 < len(text) and text[i+1] == ' ':
+            return i + 1
+    
+    # 5. Word boundaries (fallback)
+    for i in range(max_end - 1, search_start - 1, -1):
+        if text[i] == ' ':
+            return i + 1
+    
+    # 6. Last resort - use max_end
+    return max_end
 
 def main(myblob: func.InputStream):
     logging.info(f"Python blob trigger function processed blob")
@@ -82,13 +151,16 @@ def main(myblob: func.InputStream):
         with tempfile.NamedTemporaryFile(suffix='.docx', delete=False) as temp_file:
             temp_file.write(blob_bytes)
             temp_file_path = temp_file.name
-        full_text = docx2txt.process(temp_file_path)
+        text = docx2txt.process(temp_file_path)
         os.unlink(temp_file_path)
-        logging.info("Successfully extracted .docx content using docx2txt.")
+        if not text.strip():
+            logging.warning(f"No text extracted from {filename}")
+            return
 
-        # Split text into chunks using pure Python text splitter
-        chunks = simple_text_splitter(full_text, chunk_size=1000, chunk_overlap=200)
-        logging.info(f"Split text into {len(chunks)} chunks.")
+        # Split into chunks with legal-aware strategy
+        logging.info(f"Splitting document into chunks (length: {len(text)} chars)")
+        chunks = simple_text_splitter(text)
+        logging.info(f"Created {len(chunks)} chunks with enhanced legal structure preservation")
 
         # Delete existing documents for this ISO code
         logging.info(f"Searching for existing documents with iso_code: {iso_code}")
