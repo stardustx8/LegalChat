@@ -20,10 +20,18 @@ jobs:
       AZURE_FUNCTIONAPP_NAME: legaldocs-processor
       AZURE_FUNCTIONAPP_PACKAGE_PATH: 'LegalDocProcessor'
       PYTHON_VERSION: '3.9'
+      # Force workflow recognition after Static Web App config changes
+      WORKFLOW_VERSION: '2.0'
 
     steps:
       - name: 'Checkout GitHub Action'
         uses: actions/checkout@v4
+
+      - name: 'Log workflow execution'
+        run: |
+          echo "Azure Function App workflow is running - version ${{ env.WORKFLOW_VERSION }}"
+          echo "Target function app: ${{ env.AZURE_FUNCTIONAPP_NAME }}"
+          echo "Package path: ${{ env.AZURE_FUNCTIONAPP_PACKAGE_PATH }}"
 
       - name: 'Setup Python version'
         uses: actions/setup-python@v4
