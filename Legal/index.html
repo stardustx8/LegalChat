@@ -102,59 +102,412 @@
             display: none;
         }
         
-        /* Document Management Styles */
-        .document-management {
-            margin-top: 3rem;
-            padding: 2rem;
-            background-color: #f8f9fa;
-            border-radius: 8px;
-            border: 1px solid #e9ecef;
-        }
-        .document-management h2 {
-            color: #1a2b4d;
-            margin-bottom: 1.5rem;
+        /* Document Management Trigger */
+        .document-management-trigger {
+            margin-top: 20px;
             text-align: center;
         }
-        .document-management h3 {
-            color: #495057;
-            margin-bottom: 0.5rem;
-        }
-        .document-management p {
-            color: #6c757d;
-            margin-bottom: 1rem;
-            font-size: 0.9rem;
-        }
-        .delete-controls {
-            display: flex;
-            gap: 1rem;
-            align-items: center;
-            margin-bottom: 1rem;
-        }
-        .delete-controls select {
-            flex: 1;
-            padding: 0.75rem;
-            font-size: 1rem;
-            border: 1px solid #dcdcdc;
-            border-radius: 4px;
-            background-color: white;
-        }
-        .delete-btn {
-            background-color: #dc3545;
+        
+        .doc-mgmt-btn {
+            background: #007bff;
             color: white;
             border: none;
-            padding: 0.75rem 1.5rem;
+            padding: 12px 24px;
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 16px;
+            font-weight: 500;
+            transition: all 0.2s;
+            box-shadow: 0 2px 4px rgba(0,123,255,0.2);
+        }
+        
+        .doc-mgmt-btn:hover {
+            background: #0056b3;
+            transform: translateY(-1px);
+            box-shadow: 0 4px 8px rgba(0,123,255,0.3);
+        }
+        
+        /* Modal Styles */
+        .modal {
+            display: none;
+            position: fixed;
+            z-index: 1000;
+            left: 0;
+            top: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(0,0,0,0.5);
+            backdrop-filter: blur(4px);
+        }
+        
+        .modal-content {
+            background-color: #fefefe;
+            margin: 2% auto;
+            padding: 0;
+            border-radius: 12px;
+            width: 90%;
+            max-width: 1000px;
+            max-height: 90vh;
+            overflow-y: auto;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.3);
+            animation: modalSlideIn 0.3s ease-out;
+        }
+        
+        @keyframes modalSlideIn {
+            from { opacity: 0; transform: translateY(-50px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+        
+        .modal-header {
+            background: linear-gradient(135deg, #007bff, #0056b3);
+            color: white;
+            padding: 20px 30px;
+            border-radius: 12px 12px 0 0;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        
+        .modal-header h2 {
+            margin: 0;
+            font-size: 1.5em;
+        }
+        
+        .close {
+            color: white;
+            font-size: 28px;
+            font-weight: bold;
+            cursor: pointer;
+            transition: opacity 0.2s;
+        }
+        
+        .close:hover {
+            opacity: 0.7;
+        }
+        
+        .modal-body {
+            padding: 30px;
+        }
+        
+        .modal-footer {
+            background: #f8f9fa;
+            padding: 20px 30px;
+            border-radius: 0 0 12px 12px;
+            text-align: right;
+            border-top: 1px solid #dee2e6;
+        }
+        
+        /* Document Management Sections */
+        .doc-section {
+            margin-bottom: 40px;
+            padding: 25px;
+            background: #f8f9fa;
+            border-radius: 10px;
+            border: 1px solid #e9ecef;
+        }
+        
+        .doc-section:last-child {
+            margin-bottom: 0;
+        }
+        
+        .section-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 20px;
+        }
+        
+        .doc-section h3 {
+            color: #495057;
+            margin: 0;
+            font-size: 1.3em;
+        }
+        
+        .refresh-btn {
+            background: #28a745;
+            color: white;
+            border: none;
+            padding: 8px 16px;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 14px;
+            transition: background-color 0.2s;
+        }
+        
+        .refresh-btn:hover {
+            background: #218838;
+        }
+        
+        /* Status Summary */
+        .status-summary {
+            background: white;
+            padding: 15px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+            border: 1px solid #dee2e6;
+            font-weight: 500;
+        }
+        
+        /* Document List */
+        .document-list {
+            background: white;
+            border-radius: 8px;
+            border: 1px solid #dee2e6;
+            max-height: 300px;
+            overflow-y: auto;
+        }
+        
+        .document-item {
+            display: flex;
+            align-items: center;
+            padding: 12px 15px;
+            border-bottom: 1px solid #f1f3f4;
+            transition: background-color 0.2s;
+        }
+        
+        .document-item:last-child {
+            border-bottom: none;
+        }
+        
+        .document-item:hover {
+            background-color: #f8f9fa;
+        }
+        
+        .document-item.selected {
+            background-color: #e3f2fd;
+            border-left: 4px solid #007bff;
+        }
+        
+        .doc-checkbox {
+            margin-right: 12px;
+        }
+        
+        .doc-info {
+            flex: 1;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        
+        .doc-country {
+            font-weight: 500;
+            color: #495057;
+        }
+        
+        .doc-status {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        
+        .status-badge {
+            padding: 4px 8px;
+            border-radius: 12px;
+            font-size: 12px;
+            font-weight: 500;
+        }
+        
+        .status-available {
+            background: #d4edda;
+            color: #155724;
+        }
+        
+        .status-missing {
+            background: #f8d7da;
+            color: #721c24;
+        }
+        
+        .status-processing {
+            background: #fff3cd;
+            color: #856404;
+        }
+        
+        .status-indexed-only {
+            background: #cce5ff;
+            color: #004085;
+        }
+        
+        .doc-actions {
+            display: flex;
+            gap: 8px;
+        }
+        
+        .action-btn {
+            padding: 4px 8px;
+            border: none;
             border-radius: 4px;
             cursor: pointer;
-            font-size: 1rem;
-            font-weight: bold;
+            font-size: 12px;
+            transition: all 0.2s;
+        }
+        
+        .upload-btn {
+            background: #28a745;
+            color: white;
+        }
+        
+        .upload-btn:hover {
+            background: #218838;
+        }
+        
+        .replace-btn {
+            background: #ffc107;
+            color: #212529;
+        }
+        
+        .replace-btn:hover {
+            background: #e0a800;
+        }
+        
+        .delete-btn {
+            background: #dc3545;
+            color: white;
+        }
+        
+        .delete-btn:hover {
+            background: #c82333;
+        }
+        
+        .delete-btn:disabled, .replace-btn:disabled {
+            background: #6c757d;
+            cursor: not-allowed;
+        }
+        
+        /* Upload Area */
+        .upload-area {
+            background: white;
+            border-radius: 8px;
+            border: 1px solid #dee2e6;
+        }
+        
+        .drop-zone {
+            border: 2px dashed #007bff;
+            border-radius: 8px;
+            padding: 40px 20px;
+            text-align: center;
+            background: #f8f9ff;
+            transition: all 0.2s;
+            cursor: pointer;
+        }
+        
+        .drop-zone:hover, .drop-zone.drag-over {
+            border-color: #0056b3;
+            background: #e6f3ff;
+        }
+        
+        .drop-zone-content {
+            pointer-events: none;
+        }
+        
+        .drop-icon {
+            font-size: 48px;
+            margin-bottom: 15px;
+        }
+        
+        .file-format-hint {
+            color: #6c757d;
+            font-size: 14px;
+            margin-top: 10px;
+        }
+        
+        .link-btn {
+            background: none;
+            border: none;
+            color: #007bff;
+            text-decoration: underline;
+            cursor: pointer;
+            font-size: inherit;
+        }
+        
+        .link-btn:hover {
+            color: #0056b3;
+        }
+        
+        .upload-queue {
+            padding: 15px;
+            border-top: 1px solid #dee2e6;
+        }
+        
+        .upload-item {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 10px;
+            background: #f8f9fa;
+            border-radius: 6px;
+            margin-bottom: 10px;
+        }
+        
+        .upload-item:last-child {
+            margin-bottom: 0;
+        }
+        
+        .upload-progress {
+            flex: 1;
+            margin: 0 15px;
+        }
+        
+        .progress-bar {
+            width: 100%;
+            height: 6px;
+            background: #e9ecef;
+            border-radius: 3px;
+            overflow: hidden;
+        }
+        
+        .progress-fill {
+            height: 100%;
+            background: #007bff;
+            transition: width 0.3s;
+        }
+        
+        /* Bulk Operations */
+        .bulk-controls {
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            border: 1px solid #dee2e6;
+        }
+        
+        .bulk-selection {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 15px;
+            flex-wrap: wrap;
+        }
+        
+        .bulk-btn {
+            background: #6c757d;
+            color: white;
+            border: none;
+            padding: 6px 12px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 14px;
             transition: background-color 0.2s;
-            white-space: nowrap;
         }
-        .delete-btn:hover:not(:disabled) {
-            background-color: #c82333;
+        
+        .bulk-btn:hover {
+            background: #5a6268;
         }
-        .delete-btn:disabled {
-            background-color: #6c757d;
+        
+        .bulk-actions {
+            display: flex;
+            gap: 15px;
+        }
+        
+        .bulk-action-btn {
+            padding: 10px 20px;
+            border: none;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 14px;
+            font-weight: 500;
+            transition: all 0.2s;
+        }
+        
+        .bulk-action-btn:disabled {
+            opacity: 0.5;
             cursor: not-allowed;
         }
         .status-message {
@@ -186,40 +539,74 @@
         <textarea id="question" placeholder="Ask a question about knife legislation..."></textarea>
         <button id="askButton">Answer</button>
         
-        <!-- Document Management Section -->
-        <div class="document-management">
-            <h2>Document Management</h2>
-            <div class="management-controls">
-                <div class="delete-section">
-                    <h3>Delete Document</h3>
-                    <p>Remove a country's legal document from both storage and search index.</p>
-                    <div class="delete-controls">
-                        <select id="countrySelect">
-                            <option value="">Select Country...</option>
-                            <option value="AT">Austria (AT)</option>
-                            <option value="BE">Belgium (BE)</option>
-                            <option value="CH">Switzerland (CH)</option>
-                            <option value="CZ">Czech Republic (CZ)</option>
-                            <option value="DE">Germany (DE)</option>
-                            <option value="DK">Denmark (DK)</option>
-                            <option value="ES">Spain (ES)</option>
-                            <option value="FI">Finland (FI)</option>
-                            <option value="FR">France (FR)</option>
-                            <option value="GB">United Kingdom (GB)</option>
-                            <option value="IE">Ireland (IE)</option>
-                            <option value="IT">Italy (IT)</option>
-                            <option value="NL">Netherlands (NL)</option>
-                            <option value="NO">Norway (NO)</option>
-                            <option value="PL">Poland (PL)</option>
-                            <option value="PT">Portugal (PT)</option>
-                            <option value="SE">Sweden (SE)</option>
-                        </select>
-                        <button id="deleteButton" class="delete-btn">Delete Document</button>
+        <!-- Document Management Button -->
+        <div class="document-management-trigger">
+            <button id="openDocMgmtBtn" onclick="openDocumentManagement()" class="doc-mgmt-btn">
+                📁 Manage Documents
+            </button>
+        </div>
+        
+        <!-- Document Management Modal -->
+        <div id="documentManagementModal" class="modal">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h2>Document Management</h2>
+                    <span class="close">&times;</span>
+                </div>
+                <div class="modal-body">
+                    <!-- Document Status Dashboard -->
+                    <div class="doc-section">
+                        <div class="section-header">
+                            <h3>📊 Document Status</h3>
+                            <button id="refreshStatusBtn" class="refresh-btn">🔄 Refresh</button>
+                        </div>
+                        <div id="statusSummary" class="status-summary">Loading...</div>
+                        <div id="documentList" class="document-list">Loading document status...</div>
                     </div>
-                    <div id="deleteStatus" class="status-message"></div>
+                    
+                    <!-- Upload Documents -->
+                    <div class="doc-section">
+                        <h3>📤 Upload Documents</h3>
+                        <div class="upload-area">
+                            <input type="file" id="fileInput" accept=".docx" multiple style="display: none;">
+                            <div id="dropZone" class="drop-zone">
+                                <div class="drop-zone-content">
+                                    <div class="drop-icon">📁</div>
+                                    <p><strong>Drop .docx files here</strong> or <button id="browseBtn" class="link-btn">browse files</button></p>
+                                    <p class="file-format-hint">Files must be named XX.docx (e.g., DE.docx, FR.docx)</p>
+                                </div>
+                            </div>
+                            <div id="uploadQueue" class="upload-queue"></div>
+                        </div>
+                    </div>
+                    
+                    <!-- Bulk Operations -->
+                    <div class="doc-section">
+                        <h3>🔄 Bulk Operations</h3>
+                        <div class="bulk-controls">
+                            <div class="bulk-selection">
+                                <button id="selectAllBtn" class="bulk-btn">Select All</button>
+                                <button id="selectNoneBtn" class="bulk-btn">Select None</button>
+                                <button id="selectAvailableBtn" class="bulk-btn">Select Available</button>
+                                <button id="selectMissingBtn" class="bulk-btn">Select Missing</button>
+                            </div>
+                            <div class="bulk-actions">
+                                <button id="bulkDeleteBtn" class="bulk-action-btn delete-btn" disabled>🗑️ Delete Selected</button>
+                                <button id="bulkReplaceBtn" class="bulk-action-btn replace-btn" disabled>🔄 Replace Selected</button>
+                            </div>
+                        </div>
+                        <div id="bulkStatus" class="status-message"></div>
+                    </div>
+                    
+                    <!-- Status Messages -->
+                    <div id="modalStatus" class="status-message"></div>
+                </div>
+                <div class="modal-footer">
+                    <button id="closeDocMgmtBtn" class="close">Close</button>
                 </div>
             </div>
         </div>
+        
         <div id="response-area" class="hidden">
             <details>
                 <summary>Show Full Debug Output</summary>
@@ -304,111 +691,50 @@
             }
         });
         
-        // Delete document functionality
-        deleteButton.addEventListener('click', async () => {
-            const selectedCountry = countrySelect.value;
-            if (!selectedCountry) {
-                showStatus('Please select a country to delete.', 'error');
-                return;
-            }
-            
-            // Confirm deletion
-            const countryName = countrySelect.options[countrySelect.selectedIndex].text;
-            if (!confirm(`Are you sure you want to delete the legal document for ${countryName}?\n\nThis will:\n• Remove ${selectedCountry}.docx from storage\n• Delete all ${selectedCountry} documents from the search index\n\nThis action cannot be undone.`)) {
-                return;
-            }
-            
-            // Disable button and show loading state
-            deleteButton.disabled = true;
-            deleteButton.textContent = 'Deleting...';
-            showStatus('Deleting document and cleaning up index...', 'info');
-            
-            try {
-                // Step 1: Delete from storage (call delete_blob API)
-                showStatus('Step 1/2: Deleting file from storage...', 'info');
-                const deleteFileResponse = await fetch('/api/delete_blob', {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json'
-                    },
-                    body: JSON.stringify({ 
-                        container: 'legaldocsrag',
-                        filename: `${selectedCountry}.docx`
-                    })
-                });
-                
-                let fileDeleted = false;
-                if (deleteFileResponse.ok) {
-                    const fileResult = await deleteFileResponse.json();
-                    fileDeleted = fileResult.success;
-                    if (!fileDeleted) {
-                        console.warn('File deletion failed or file not found:', fileResult.message);
-                    }
-                } else {
-                    console.warn('File deletion API call failed:', deleteFileResponse.status);
-                }
-                
-                // Step 2: Clean up search index (always do this, even if file wasn't found)
-                showStatus('Step 2/2: Cleaning up search index...', 'info');
-                const cleanupResponse = await fetch('/api/cleanup_index', {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json'
-                    },
-                    body: JSON.stringify({ iso_code: selectedCountry })
-                });
-                
-                if (cleanupResponse.ok) {
-                    const cleanupResult = await cleanupResponse.json();
-                    if (cleanupResult.success) {
-                        const deletedCount = cleanupResult.deleted_count;
-                        let message = `✅ Successfully deleted ${countryName} documents!\n`;
-                        
-                        if (fileDeleted) {
-                            message += `• File ${selectedCountry}.docx removed from storage\n`;
-                        } else {
-                            message += `• File ${selectedCountry}.docx was not found in storage\n`;
-                        }
-                        
-                        if (deletedCount > 0) {
-                            message += `• ${deletedCount} documents removed from search index`;
-                        } else {
-                            message += `• No documents found in search index to remove`;
-                        }
-                        
-                        showStatus(message, 'success');
-                        
-                        // Reset the country selection
-                        countrySelect.value = '';
-                    } else {
-                        showStatus(`❌ Index cleanup failed: ${cleanupResult.error || 'Unknown error'}`, 'error');
-                    }
-                } else {
-                    const errorText = await cleanupResponse.text();
-                    showStatus(`❌ Index cleanup failed: ${errorText}`, 'error');
-                }
-                
-            } catch (error) {
-                console.error('Delete operation failed:', error);
-                showStatus(`❌ Delete operation failed: ${error.message}`, 'error');
-            } finally {
-                // Re-enable button
-                deleteButton.disabled = false;
-                deleteButton.textContent = 'Delete Document';
-            }
+        // Initialize document management
+        setupFileUpload();
+        
+        // Modal event listeners
+        const modal = document.getElementById('documentManagementModal');
+        const closeButtons = modal.querySelectorAll('.close');
+        
+        closeButtons.forEach(btn => {
+            btn.onclick = closeDocumentManagement;
         });
+        
+        // Close modal when clicking outside
+        window.onclick = (event) => {
+            if (event.target === modal) {
+                closeDocumentManagement();
+            }
+        };
+        
+        // Bulk operation event listeners
+        document.getElementById('refreshStatusBtn').onclick = loadDocumentStatus;
+        document.getElementById('selectAllBtn').onclick = selectAllDocuments;
+        document.getElementById('selectNoneBtn').onclick = selectNoDocuments;
+        document.getElementById('selectAvailableBtn').onclick = selectAvailableDocuments;
+        document.getElementById('selectMissingBtn').onclick = selectMissingDocuments;
+        document.getElementById('bulkDeleteBtn').onclick = bulkDeleteDocuments;
+        document.getElementById('bulkReplaceBtn').onclick = () => {
+            // Bulk replace - trigger file input for multiple files
+            document.getElementById('fileInput').click();
+        };
         
         // Helper function to show status messages
         function showStatus(message, type) {
-            deleteStatus.textContent = message;
-            deleteStatus.className = `status-message ${type}`;
-            deleteStatus.style.display = 'block';
-            
-            // Auto-hide success messages after 10 seconds
-            if (type === 'success') {
-                setTimeout(() => {
-                    deleteStatus.style.display = 'none';
-                }, 10000);
+            const deleteStatus = document.getElementById('deleteStatus');
+            if (deleteStatus) {
+                deleteStatus.textContent = message;
+                deleteStatus.className = `status-message ${type}`;
+                deleteStatus.style.display = 'block';
+                
+                // Auto-hide success messages after 10 seconds
+                if (type === 'success') {
+                    setTimeout(() => {
+                        deleteStatus.style.display = 'none';
+                    }, 10000);
+                }
             }
         }
     </script>
