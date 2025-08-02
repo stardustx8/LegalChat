@@ -64,8 +64,59 @@ def embed(text: str, client: AzureOpenAI, deploy_embed: str) -> list[float]:
         model=deploy_embed
     ).data[0].embedding
 
-# Note: Removed balance_country_representation function
-# New approach: Return ALL documents from detected countries and let drafter/refiner filter naturally
+def balance_country_representation(results: list[dict], iso_codes: list[str], target_k: int) -> list[dict]:
+    """Ensures balanced representation from all detected countries in search results.
+    
+    For multi-country queries (e.g., EuroAirport -> CH, FR), this function ensures
+    that documents from all countries are included in the final results, not just
+    the most semantically similar ones which might all come from one country.
+    
+    Args:
+        results: Raw search results from Azure Cognitive Search
+        iso_codes: List of detected ISO country codes
+        target_k: Target number of documents to return
+    
+    Returns:
+        Balanced list of documents with representation from all countries
+    """
+    if not results or len(iso_codes) <= 1:
+        return results[:target_k]
+    
+    # Group results by country
+    by_country = {}
+    for result in results:
+        country = result.get('iso_code', 'UNKNOWN')
+        if country not in by_country:
+            by_country[country] = []
+        by_country[country].append(result)
+    
+    # Calculate how many documents to take from each country
+    available_countries = [code for code in iso_codes if code in by_country]
+    if not available_countries:
+        return results[:target_k]
+    
+    docs_per_country = max(1, target_k // len(available_countries))
+    remainder = target_k % len(available_countries)
+    
+    balanced_results = []
+    
+    # Take documents from each country
+    for i, country in enumerate(available_countries):
+        country_docs = by_country[country]
+        # Give extra documents to first few countries if there's a remainder
+        take_count = docs_per_country + (1 if i < remainder else 0)
+        balanced_results.extend(country_docs[:take_count])
+    
+    # If we still need more documents and some countries have extras, add them
+    if len(balanced_results) < target_k:
+        for country in available_countries:
+            if len(balanced_results) >= target_k:
+                break
+            remaining_docs = by_country[country][docs_per_country:]
+            needed = target_k - len(balanced_results)
+            balanced_results.extend(remaining_docs[:needed])
+    
+    return balanced_results[:target_k]
 
 def extract_iso_codes(text: str, client: AzureOpenAI, deploy_chat: str) -> list[str]:
     """Extracts ISO-3166-1 alpha-2 country codes from text using an LLM call."""
@@ -99,11 +150,10 @@ def extract_iso_codes(text: str, client: AzureOpenAI, deploy_chat: str) -> list[
         return []
 
 def retrieve(query: str, iso_codes: list[str], client: AzureOpenAI, config: dict, k: int = 5) -> list[dict]:
-    """Retrieves ALL relevant documents from detected countries.
+    """Retrieves documents from Azure Cognitive Search based on a vector query and filters.
     
-    For multi-country queries, returns all documents from all detected countries,
-    letting the drafter/refiner process handle relevance filtering naturally.
-    This ensures no critical information is lost due to artificial k limits.
+    For multi-country queries (e.g., EuroAirport), ensures balanced representation
+    from all detected countries rather than just the most semantically similar documents.
     """
     logging.info(f"DEBUG: retrieve() called with query='{query}', iso_codes={iso_codes}")
     
@@ -123,9 +173,8 @@ def retrieve(query: str, iso_codes: list[str], client: AzureOpenAI, config: dict
     headers = {'Content-Type': 'application/json', 'api-key': config['search_key']}
     filter_str = f"search.in(iso_code, '{','.join(iso_codes)}', ',')"
     
-    # Use generous k to get all relevant documents from all countries
-    # Let the drafter/refiner process handle filtering instead of artificial limits
-    search_k = 50 if len(iso_codes) > 1 else k
+    # For multi-country queries, increase k to ensure we get documents from all countries
+    search_k = max(k * len(iso_codes), 10) if len(iso_codes) > 1 else k
     
     payload = {
         "vectorQueries": [
@@ -137,23 +186,28 @@ def retrieve(query: str, iso_codes: list[str], client: AzureOpenAI, config: dict
             }
         ],
         "filter": filter_str,
-        "select": "chunk,iso_code,id",
+        "select": "chunk,iso_code,id"
     }
     
     logging.info(f"DEBUG: Sending search request to {search_url}")
     logging.info(f"DEBUG: Filter: {filter_str}")
-    logging.info(f"DEBUG: Using generous k={search_k} for {len(iso_codes)} countries - letting LLM filter")
+    logging.info(f"DEBUG: Search k adjusted from {k} to {search_k} for {len(iso_codes)} countries")
     logging.info(f"DEBUG: Payload keys: {list(payload.keys())}")
     
     try:
         response = requests.post(search_url, headers=headers, json=payload)
         logging.info(f"DEBUG: Search response status: {response.status_code}")
         response.raise_for_status()
-        results = response.json().get('value', [])
-        logging.info(f"DEBUG: Retrieved {len(results)} documents from {len(set(r['iso_code'] for r in results))} countries")
+        raw_results = response.json().get('value', [])
+        logging.info(f"DEBUG: Raw search returned {len(raw_results)} documents")
         
-        # Return all results - let the drafter/refiner handle relevance filtering
-        return results
+        # For multi-country queries, ensure balanced representation
+        if len(iso_codes) > 1 and raw_results:
+            balanced_results = balance_country_representation(raw_results, iso_codes, k)
+            logging.info(f"DEBUG: Balanced results: {len(balanced_results)} documents from {len(set(r['iso_code'] for r in balanced_results))} countries")
+            return balanced_results
+        else:
+            return raw_results[:k]  # Limit to original k for single-country queries
             
     except requests.exceptions.RequestException as e:
         logging.error(f"DEBUG: Search request failed: {e}")
@@ -377,12 +431,7 @@ def chat(question: str, client: AzureOpenAI, config: dict) -> str:
         # --- Step 2: Grade and Refine Answer ---
         logging.info("DEBUG: Step 6 - Calling OpenAI for refining...")
         refiner_user_message = f"""CONTEXT:\n{context}\n\nQUESTION: {question}\n\nDRAFT_ANSWER:\n{draft_with_header}"""
-        # Log length but avoid logging full content to prevent context overflow
-        logging.info(f"DEBUG: Refiner message length: {len(refiner_user_message)} characters, context chunks: {len(chunks)}")
-        
-        # Warn if message is getting very large
-        if len(refiner_user_message) > 50000:
-            logging.warning(f"DEBUG: Large refiner message ({len(refiner_user_message)} chars) may exceed model context window")
+        logging.info(f"DEBUG: Refiner message length: {len(refiner_user_message)} characters")
 
         try:
             refine_resp = client.chat.completions.create(

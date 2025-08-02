@@ -1,138 +1,141 @@
-import logging, os, re, tempfile, json, itertools
-from pathlib import Path
+import logging
+import os
+import re
+import tempfile
+import docx2txt
+import json
+import requests
 
 import azure.functions as func
+# Trigger workflow test - both frontend and backend operational
 from azure.core.credentials import AzureKeyCredential
 from azure.search.documents import SearchClient
-import docx2txt, requests
 
-# ---------------------------------------------------------------------------
-# 1.  TEXT‑PREPARATION UTILITIES
-# ---------------------------------------------------------------------------
-
-_SENT_END = re.compile(r"[.!?]\s+")
-_BULLET = re.compile(r"^\s*(?:\*|-|•|\d+[.)])\s+", re.M)
-
-def split_legal_text(text: str,
-                     chunk_size: int = 750,
-                     overlap: int = 100) -> list[str]:
-    """
-    Heuristically preserves legal structure while keeping chunks short enough
-    for the embedding model.  The algorithm prefers to cut on double line
-    breaks, then on list markers, then on sentence ends.
-    """
-    start, n = 0, len(text)
-    chunks: list[str] = []
-
-    while start < n:
-        raw = text[start:start + chunk_size + 200]       # +200 look‑ahead
-        if len(raw) <= chunk_size:
-            chunks.append(raw.strip())
-            break
-
-        # candidate cutpoints, scored by desirability
-        candidates = {
-    raw.rfind("\n\n", 0, chunk_size): 3,
-    max((m.end() for m in _BULLET.finditer(raw[:chunk_size])), default=-1): 2,
-    max((m.end() for m in _SENT_END.finditer(raw[:chunk_size])), default=-1): 1,
-    raw.rfind(" ", 0, chunk_size): 0
-}
-        cut = max((pos for pos in candidates if pos > 0),
-                  key=lambda p: candidates[p])
-
-        chunk = raw[:cut].strip()
-        chunks.append(chunk)
-        start += max(cut - overlap, 1)
-
-    return [c for c in chunks if c]                      # drop empties
-
-
-# ---------------------------------------------------------------------------
-# 2.  OPENAI HELPER
-# ---------------------------------------------------------------------------
-
-def embed_batch(texts, openai_url, headers, batch=16):
-    """Batched embeddings with graceful degradation."""
-    for i in range(0, len(texts), batch):
-        payload = {"input": texts[i:i + batch]}
-        resp = requests.post(openai_url, headers=headers, json=payload, timeout=30)
-        resp.raise_for_status()
-        datas = resp.json()["data"]
-        for rec in datas:
-            yield rec["embedding"]
-
-
-# ---------------------------------------------------------------------------
-# 3.  FUNCTION ENTRY‑POINT
-# ---------------------------------------------------------------------------
+# Simple text splitter function to avoid langchain dependency
+def simple_text_splitter(text, chunk_size=1000, chunk_overlap=200):
+    chunks = []
+    start = 0
+    while start < len(text):
+        end = start + chunk_size
+        if end < len(text):
+            # Find the last space within the chunk to avoid breaking words
+            while end > start and text[end] != ' ':
+                end -= 1
+            if end == start:  # No space found, use original end
+                end = start + chunk_size
+        chunk = text[start:end].strip()
+        if chunk:
+            chunks.append(chunk)
+        start = end - chunk_overlap if end > chunk_overlap else end
+    return chunks
 
 def main(myblob: func.InputStream):
-    log = logging.getLogger("knife‑ingest")
-    log.info("Processing blob %s (%d B)", myblob.name, myblob.length)
+    logging.info(f"Python blob trigger function processed blob")
+    logging.info(f"Name: {myblob.name}")
+    logging.info(f"Size: {myblob.length} Bytes")
 
-    m = re.match(r"([A-Z]{2})\.docx$", Path(myblob.name).name)
-    if not m:
-        log.error("Filename must be two‑letter ISO code, got %s", myblob.name)
+    # Extract ISO code from filename
+    filename = myblob.name.split('/')[-1]
+    match = re.match(r"([A-Z]{2})\.docx", filename)
+    if not match:
+        logging.error(f"Invalid filename format: {filename}. Expected 'XX.docx' where XX is a 2-letter ISO code.")
         return
-    iso = m.group(1)
+    iso_code = match.group(1)
+    logging.info(f"Processing document for ISO code: {iso_code}")
 
-    # --- environment ---
+    # Azure Cognitive Search and OpenAI settings from environment variables
+    search_endpoint = os.environ.get("KNIFE_SEARCH_ENDPOINT")
+    search_key = os.environ.get("KNIFE_SEARCH_KEY")
+    search_index_name = os.environ.get("KNIFE_SEARCH_INDEX")
+    openai_endpoint = os.environ.get("KNIFE_OPENAI_ENDPOINT")
+    openai_key = os.environ.get("KNIFE_OPENAI_KEY")
+    openai_embedding_deployment = os.environ.get("KNIFE_OPENAI_DEPLOY")
+
+    # Check environment variables and log missing
+    env_vars = {
+        "KNIFE_SEARCH_ENDPOINT": search_endpoint,
+        "KNIFE_SEARCH_KEY": search_key,
+        "KNIFE_SEARCH_INDEX": search_index_name,
+        "KNIFE_OPENAI_ENDPOINT": openai_endpoint,
+        "KNIFE_OPENAI_KEY": openai_key,
+        "KNIFE_OPENAI_DEPLOY": openai_embedding_deployment
+    }
+    missing_vars = [key for key, value in env_vars.items() if not value]
+    if missing_vars:
+        logging.error(f"Missing required environment variables: {', '.join(missing_vars)}")
+        return
+
+    # Prepare OpenAI REST API headers and endpoint
+    openai_headers = {
+        "Content-Type": "application/json",
+        "api-key": openai_key
+    }
+    openai_url = f"{openai_endpoint}/openai/deployments/{openai_embedding_deployment}/embeddings?api-version=2023-05-15"
+
+    # Initialize Search client
+    search_credential = AzureKeyCredential(search_key)
+    search_client = SearchClient(endpoint=search_endpoint, index_name=search_index_name, credential=search_credential)
+
     try:
-        cfg = {
-            "search_endpoint": os.environ["KNIFE_SEARCH_ENDPOINT"],
-            "search_key":      os.environ["KNIFE_SEARCH_KEY"],
-            "index_name":      os.environ["KNIFE_SEARCH_INDEX"],
-            "openai_endpoint": os.environ["KNIFE_OPENAI_ENDPOINT"],
-            "openai_key":      os.environ["KNIFE_OPENAI_KEY"],
-            "openai_deploy":   os.environ["KNIFE_OPENAI_DEPLOY"]
-        }
-    except KeyError as k:
-        log.error("Missing env var: %s", k.args[0]);  return
+        # Read the document from the blob stream using docx2txt
+        blob_bytes = myblob.read()
+        with tempfile.NamedTemporaryFile(suffix='.docx', delete=False) as temp_file:
+            temp_file.write(blob_bytes)
+            temp_file_path = temp_file.name
+        full_text = docx2txt.process(temp_file_path)
+        os.unlink(temp_file_path)
+        logging.info("Successfully extracted .docx content using docx2txt.")
 
-    openai_url = (f"{cfg['openai_endpoint']}/openai/deployments/"
-                  f"{cfg['openai_deploy']}/embeddings?api-version=2023-05-15")
-    headers = {"api-key": cfg["openai_key"], "Content-Type": "application/json"}
+        # Split text into chunks using pure Python text splitter
+        chunks = simple_text_splitter(full_text, chunk_size=1000, chunk_overlap=200)
+        logging.info(f"Split text into {len(chunks)} chunks.")
 
-    # --- extract plain text ---
-    with tempfile.NamedTemporaryFile(suffix=".docx", delete=False) as tmp:
-        tmp.write(myblob.read())
-        tmp.flush()
-        full_text = docx2txt.process(tmp.name)
-    Path(tmp.name).unlink(missing_ok=True)
+        # Delete existing documents for this ISO code
+        logging.info(f"Searching for existing documents with iso_code: {iso_code}")
+        results = search_client.search(search_text="*", filter=f"iso_code eq '{iso_code}'", select="id")
+        docs_to_delete = [{"id": doc["id"]} for doc in results]
 
-    if not full_text.strip():
-        log.warning("No text extracted from %s", myblob.name);  return
+        if docs_to_delete:
+            logging.info(f"Found {len(docs_to_delete)} documents to delete.")
+            delete_result = search_client.delete_documents(documents=docs_to_delete)
+            if all([res.succeeded for res in delete_result]):
+                logging.info("Successfully deleted old documents.")
+            else:
+                logging.error(f"Failed to delete some documents: {delete_result}")
+        else:
+            logging.info("No existing documents found for this ISO code.")
 
-    # --- chunk & embed ---
-    chunks = split_legal_text(full_text)
-    log.info("Split into %d chunks", len(chunks))
+        # Generate embeddings and prepare documents for upload
+        docs_to_upload = []
+        for i, chunk in enumerate(chunks):
+            # Make direct REST API call to Azure OpenAI
+            payload = {
+                "input": chunk
+            }
+            response = requests.post(openai_url, headers=openai_headers, json=payload)
+            response.raise_for_status()
+            embedding_data = response.json()
+            embedding = embedding_data['data'][0]['embedding']
+            
+            doc = {
+                "id": f"{iso_code}-{i}",
+                "chunk": chunk,
+                "embedding": embedding,
+                "iso_code": iso_code
+            }
+            docs_to_upload.append(doc)
 
-    embeddings = list(embed_batch(chunks, openai_url, headers))
-    assert len(embeddings) == len(chunks)
+        if docs_to_upload:
+            logging.info(f"Uploading {len(docs_to_upload)} new documents to the search index.")
+            upload_result = search_client.upload_documents(documents=docs_to_upload)
+            if all([res.succeeded for res in upload_result]):
+                logging.info("Successfully uploaded new documents.")
+            else:
+                logging.error(f"Failed to upload some documents: {upload_result}")
+        else:
+            logging.warning("No documents to upload.")
 
-    # --- prepare docs ---
-    docs = [{
-        "id": f"{iso}-{i}",
-        "iso_code": iso,
-        "chunk_index": i,
-        "content": chunk,
-        "vector": vec
-    } for i, (chunk, vec) in enumerate(zip(chunks, embeddings))]
-
-    # --- upsert into search ---
-    search = SearchClient(cfg["search_endpoint"],
-                          cfg["index_name"],
-                          AzureKeyCredential(cfg["search_key"]))
-
-    # wipe old docs for fresh rebuild
-    old = [{"id": d["id"]} for d in
-           search.search("*", filter=f"iso_code eq '{iso}'", select="id")]
-    if old:
-        search.delete_documents(old)
-
-    res = search.upload_documents(docs)
-    failures = [r for r in res if not r.succeeded]
-    if failures:
-        log.error("Failed to upload %d/%d docs", len(failures), len(docs))
-    else:
-        log.info("Ingestion complete: %d docs for %s", len(docs), iso)
+    except Exception as e:
+        logging.error(f"An error occurred: {e}")
+        import traceback
+        logging.error(f"Traceback: {traceback.format_exc()}")
