@@ -586,31 +586,31 @@ Be extremely precise - only flag content as "missing" if genuinely absent, not j
         try:
             refined_data = json.loads(refined_output_json)
             
-            # Extract evaluation metrics for logging and debugging
-            evaluation = refined_data.get('evaluation', {})
-            if 'recall_analysis' in evaluation:
-                recall_score = evaluation['recall_analysis'].get('recall_score', 'N/A')
-                logging.info(f"DEBUG: Evaluation recall score: {recall_score}")
-            if 'precision_analysis' in evaluation:
-                precision_score = evaluation['precision_analysis'].get('precision_score', 'N/A')
-                logging.info(f"DEBUG: Evaluation precision score: {precision_score}")
-            if 'f1_score' in evaluation:
-                f1_score = evaluation.get('f1_score', 'N/A')
-                logging.info(f"DEBUG: Evaluation F1 score: {f1_score}")
-            
-            # Log missing facts and unsupported claims for debugging
-            missing_facts = evaluation.get('missing_facts', [])
-            unsupported_claims = evaluation.get('unsupported_claims', [])
-            logging.info(f"DEBUG: Missing facts count: {len(missing_facts)}")
-            logging.info(f"DEBUG: Unsupported claims count: {len(unsupported_claims)}")
-            
-            # Log jurisdiction coverage for multi-country queries
-            if 'recall_analysis' in evaluation:
-                jurisdictions_covered = evaluation['recall_analysis'].get('jurisdictions_covered', [])
-                jurisdictions_missing = evaluation['recall_analysis'].get('jurisdictions_missing', [])
-                logging.info(f"DEBUG: Jurisdictions covered: {jurisdictions_covered}")
-                logging.info(f"DEBUG: Jurisdictions missing facts: {jurisdictions_missing}")
-                logging.info(f"DEBUG: Multi-jurisdictional coverage: {len(jurisdictions_covered)} covered, {len(jurisdictions_missing)} incomplete")
+        #    # Extract evaluation metrics for logging and debugging
+        #    evaluation = refined_data.get('evaluation', {})
+        #    if 'recall_analysis' in evaluation:
+        #        recall_score = evaluation['recall_analysis'].get('recall_score', 'N/A')
+        #        logging.info(f"DEBUG: Evaluation recall score: {recall_score}")
+        #    if 'precision_analysis' in evaluation:
+        #        precision_score = evaluation['precision_analysis'].get('precision_score', 'N/A')
+        #        logging.info(f"DEBUG: Evaluation precision score: {precision_score}")
+        #    if 'f1_score' in evaluation:
+        #        f1_score = evaluation.get('f1_score', 'N/A')
+        #        logging.info(f"DEBUG: Evaluation F1 score: {f1_score}")
+        #    
+        #    # Log missing facts and unsupported claims for debugging
+        #    missing_facts = evaluation.get('missing_facts', [])
+        #    unsupported_claims = evaluation.get('unsupported_claims', [])
+        #    logging.info(f"DEBUG: Missing facts count: {len(missing_facts)}")
+        #    logging.info(f"DEBUG: Unsupported claims count: {len(unsupported_claims)}")
+        #    
+        #    # Log jurisdiction coverage for multi-country queries
+        #    if 'recall_analysis' in evaluation:
+        #        jurisdictions_covered = evaluation['recall_analysis'].get('jurisdictions_covered', [])
+        #        jurisdictions_missing = evaluation['recall_analysis'].get('jurisdictions_missing', [])
+        #        logging.info(f"DEBUG: Jurisdictions covered: {jurisdictions_covered}")
+        #        logging.info(f"DEBUG: Jurisdictions missing facts: {jurisdictions_missing}")
+        #        logging.info(f"DEBUG: Multi-jurisdictional coverage: {len(jurisdictions_covered)} covered, {len(jurisdictions_missing)} incomplete")
             
             # Get the refined answer (should already include header since we evaluated draft_with_header)
             answer = refined_data.get('refined_answer', '')
@@ -618,7 +618,7 @@ Be extremely precise - only flag content as "missing" if genuinely absent, not j
             
         except json.JSONDecodeError as json_error:
             logging.error(f"DEBUG: Failed to decode systematic evaluation JSON: {json_error}")
-            logging.error(f"DEBUG: Raw refiner output: {refined_output_json[:500]}...")
+        #    logging.error(f"DEBUG: Raw refiner output: {refined_output_json[:500]}...")
             # Fallback to the draft with header if the refiner fails
             refined_data = {
                 "evaluation": {
@@ -633,14 +633,17 @@ Be extremely precise - only flag content as "missing" if genuinely absent, not j
         logging.info("DEBUG: Step 8 - Building final systematic evaluation response")
         # Return the complete evaluation data for debugging and quality monitoring
         evaluation_data = refined_data.get('evaluation', {})
+    #    final_response = {
+    #        "refined_answer": answer,
+    #        "evaluation_metrics": evaluation_data,
+    #        "country_header_included": True,
+    #        "systematic_evaluation": True,
+    #        "jurisdiction_aware_evaluation": True,
+    #        "detected_countries": iso_codes,
+    #        "sources_count": len(chunks)
+    #    }
         final_response = {
-            "refined_answer": answer,
-            "evaluation_metrics": evaluation_data,
-            "country_header_included": True,
-            "systematic_evaluation": True,
-            "jurisdiction_aware_evaluation": True,
-            "detected_countries": iso_codes,
-            "sources_count": len(chunks)
+            "refined_answer": answer
         }
         
         logging.info("DEBUG: Systematic evaluation pipeline completed")
