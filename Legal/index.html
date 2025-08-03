@@ -531,178 +531,6 @@
             color: #0c5460;
             border: 1px solid #bee5eb;
         }
-
-                /* Updated Document Management Styles */
-                .section-header {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            margin-bottom: 20px;
-        }
-        
-        .header-left {
-            display: flex;
-            align-items: center;
-            gap: 20px;
-        }
-        
-        .select-all-container {
-            display: flex;
-            align-items: center;
-            gap: 8px;
-            cursor: pointer;
-            font-size: 14px;
-            color: #495057;
-        }
-        
-        .select-all-checkbox {
-            width: 16px;
-            height: 16px;
-            cursor: pointer;
-        }
-        
-        .upload-section {
-            margin-top: 30px;
-        }
-        
-        .upload-guidance {
-            background: #e8f4f8;
-            padding: 15px;
-            border-radius: 6px;
-            margin-bottom: 15px;
-            border-left: 4px solid #17a2b8;
-        }
-        
-        .upload-guidance p {
-            margin: 0 0 8px 0;
-            font-size: 14px;
-            line-height: 1.4;
-        }
-        
-        .upload-guidance p:last-child {
-            margin-bottom: 0;
-        }
-        
-        .delete-controls {
-            margin-top: 15px;
-            padding-top: 15px;
-            border-top: 1px solid #dee2e6;
-        }
-        
-        .delete-btn {
-            background: #dc3545;
-            color: white;
-            border: none;
-            padding: 10px 20px;
-            border-radius: 6px;
-            cursor: pointer;
-            font-size: 14px;
-            transition: background-color 0.2s;
-        }
-        
-        .delete-btn:hover:not(:disabled) {
-            background: #c82333;
-        }
-        
-        .delete-btn:disabled {
-            background: #6c757d;
-            cursor: not-allowed;
-            opacity: 0.6;
-        }
-        
-        .loading-message {
-            text-align: center;
-            padding: 20px;
-            color: #6c757d;
-            font-style: italic;
-        }
-        
-        .empty-state {
-            text-align: center;
-            padding: 40px 20px;
-            color: #6c757d;
-        }
-        
-        .empty-state-icon {
-            font-size: 48px;
-            margin-bottom: 15px;
-            opacity: 0.5;
-        }
-        
-        /* Document item updates for dynamic listing */
-        .document-item {
-            display: flex;
-            align-items: center;
-            padding: 12px 15px;
-            border-bottom: 1px solid #f1f3f4;
-            transition: background-color 0.2s;
-        }
-        
-        .document-item:last-child {
-            border-bottom: none;
-        }
-        
-        .document-item:hover {
-            background-color: #f8f9fa;
-        }
-        
-        .document-item.selected {
-            background-color: #e3f2fd;
-            border-left: 4px solid #007bff;
-        }
-        
-        .doc-checkbox {
-            margin-right: 12px;
-            width: 16px;
-            height: 16px;
-            cursor: pointer;
-        }
-        
-        .doc-info {
-            flex: 1;
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-        }
-        
-        .doc-details {
-            display: flex;
-            flex-direction: column;
-            gap: 4px;
-        }
-        
-        .doc-filename {
-            font-weight: 500;
-            color: #495057;
-            font-size: 15px;
-        }
-        
-        .doc-country-name {
-            font-size: 13px;
-            color: #6c757d;
-        }
-        
-        .doc-status-badge {
-            padding: 4px 8px;
-            border-radius: 12px;
-            font-size: 12px;
-            font-weight: 500;
-        }
-        
-        .status-available {
-            background: #d4edda;
-            color: #155724;
-        }
-        
-        .status-processing {
-            background: #fff3cd;
-            color: #856404;
-        }
-        
-        .status-error {
-            background: #f8d7da;
-            color: #721c24;
-        }
     </style>
 </head>
 <body>
@@ -726,47 +554,55 @@
                     <span class="close">&times;</span>
                 </div>
                 <div class="modal-body">
-                    <!-- Available Documents Section -->
+                    <!-- Document Status Dashboard -->
                     <div class="doc-section">
                         <div class="section-header">
-                            <div class="header-left">
-                                <h3>📄 Available Documents</h3>
-                                <label class="select-all-container">
-                                    <input type="checkbox" id="selectAllCheckbox" class="select-all-checkbox">
-                                    <span class="select-all-label">Select All</span>
-                                </label>
-                            </div>
-                            <button id="refreshDocumentsBtn" class="refresh-btn">🔄 Refresh</button>
+                            <h3>📊 Document Status</h3>
+                            <button id="refreshStatusBtn" class="refresh-btn">🔄 Refresh</button>
                         </div>
-                        <div id="documentList" class="document-list">
-                            <div class="loading-message">Loading documents...</div>
-                        </div>
-                        <div class="delete-controls">
-                            <button id="deleteSelectedBtn" class="delete-btn" disabled>🗑️ Delete Selected Documents</button>
-                        </div>
+                        <div id="statusSummary" class="status-summary">Loading...</div>
+                        <div id="documentList" class="document-list">Loading document status...</div>
                     </div>
                     
-                    <!-- Upload New Documents Section -->
-                    <div class="doc-section upload-section">
-                        <h3>📤 Upload New Documents</h3>
-                        <div class="upload-guidance">
-                            <p><strong>Filename Requirements:</strong> Files must be named with valid ISO 3166-1 alpha-2 country codes (e.g., DE.docx, FR.docx, CH.docx)</p>
-                            <p><strong>Note:</strong> Uploading a file with an existing country code will replace the current document for that country.</p>
-                        </div>
+                    <!-- Upload Documents -->
+                    <div class="doc-section">
+                        <h3>📤 Upload Documents</h3>
                         <div class="upload-area">
                             <input type="file" id="fileInput" accept=".docx" multiple style="display: none;">
                             <div id="dropZone" class="drop-zone">
                                 <div class="drop-zone-content">
                                     <div class="drop-icon">📁</div>
                                     <p><strong>Drop .docx files here</strong> or <button id="browseBtn" class="link-btn">browse files</button></p>
+                                    <p class="file-format-hint">Files must be named XX.docx (e.g., DE.docx, FR.docx)</p>
                                 </div>
                             </div>
                             <div id="uploadQueue" class="upload-queue"></div>
                         </div>
                     </div>
                     
+                    <!-- Bulk Operations -->
+                    <div class="doc-section">
+                        <h3>🔄 Bulk Operations</h3>
+                        <div class="bulk-controls">
+                            <div class="bulk-selection">
+                                <button id="selectAllBtn" class="bulk-btn">Select All</button>
+                                <button id="selectNoneBtn" class="bulk-btn">Select None</button>
+                                <button id="selectAvailableBtn" class="bulk-btn">Select Available</button>
+                                <button id="selectMissingBtn" class="bulk-btn">Select Missing</button>
+                            </div>
+                            <div class="bulk-actions">
+                                <button id="bulkDeleteBtn" class="bulk-action-btn delete-btn" disabled>🗑️ Delete Selected</button>
+                                <button id="bulkReplaceBtn" class="bulk-action-btn replace-btn" disabled>🔄 Replace Selected</button>
+                            </div>
+                        </div>
+                        <div id="bulkStatus" class="status-message"></div>
+                    </div>
+                    
                     <!-- Status Messages -->
                     <div id="modalStatus" class="status-message"></div>
+                </div>
+                <div class="modal-footer">
+                    <button id="closeDocMgmtBtn" class="close">Close</button>
                 </div>
             </div>
         </div>
@@ -790,277 +626,192 @@
         let selectedDocuments = new Set();
         
         // Global functions - accessible from onclick handlers
-                // Updated Document Management Functions
-                function openDocumentManagement() {
-            console.log('DEBUG: Opening document management modal');
+        function openDocumentManagement() {
+            console.log('DEBUG: openDocumentManagement() called');
             const modal = document.getElementById('documentManagementModal');
             console.log('DEBUG: Modal element found:', modal);
             
             if (!modal) {
-                console.error('ERROR: Document management modal not found');
+                console.error('ERROR: documentManagementModal not found in DOM');
                 alert('Error: Document management modal not found. Please refresh the page.');
                 return;
             }
             
             console.log('DEBUG: Setting modal display to block');
             modal.style.display = 'block';
-            
-            // Load available documents
-            loadAvailableDocuments();
+            console.log('DEBUG: Modal display set, calling loadDocumentStatus()');
+            loadDocumentStatus();
         }
         
         function closeDocumentManagement() {
+            console.log('DEBUG: closeDocumentManagement() called');
             const modal = document.getElementById('documentManagementModal');
             if (modal) {
                 modal.style.display = 'none';
+                console.log('DEBUG: Modal closed');
             }
         }
         
-        async function loadAvailableDocuments() {
-            console.log('DEBUG: Loading available documents');
-            const documentList = document.getElementById('documentList');
-            const selectAllCheckbox = document.getElementById('selectAllCheckbox');
+        // Document Status Management
+        async function loadDocumentStatus() {
+            console.log('DEBUG: loadDocumentStatus() called');
+            try {
+                console.log('DEBUG: Showing loading status');
+                showModalStatus('Loading document status...', 'info');
+                
+                console.log('DEBUG: Fetching /api/document_status');
+                const response = await fetch('/api/document_status');
+                console.log('DEBUG: Response status:', response.status);
+                console.log('DEBUG: Response headers:', Object.fromEntries(response.headers.entries()));
+                
+                if (response.ok) {
+                    console.log('DEBUG: Response OK, parsing JSON');
+                    const result = await response.json();
+                    console.log('DEBUG: API result:', result);
+                    
+                    if (result.success) {
+                        console.log('DEBUG: Success, updating document status array');
+                        documentStatus = result.document_status;
+                        console.log('DEBUG: Document status array:', documentStatus);
+                        
+                        console.log('DEBUG: Updating status summary');
+                        updateStatusSummary(result);
+                        
+                        console.log('DEBUG: Rendering document list');
+                        renderDocumentList();
+                        
+                        console.log('DEBUG: Clearing status message');
+                        showModalStatus('', '');
+                    } else {
+                        console.error('ERROR: API returned success=false:', result.message);
+                        showModalStatus(`Error loading status: ${result.message}`, 'error');
+                    }
+                } else {
+                    console.error('ERROR: HTTP response not OK:', response.status);
+                    const errorText = await response.text();
+                    console.error('ERROR: Response text:', errorText);
+                    showModalStatus(`Failed to load document status: ${errorText}`, 'error');
+                }
+            } catch (error) {
+                console.error('ERROR: Exception in loadDocumentStatus:', error);
+                showModalStatus(`Error loading document status: ${error.message}`, 'error');
+            }
+        }
+        
+        function updateStatusSummary(result) {
+            console.log('DEBUG: updateStatusSummary() called with:', result);
+            const summary = document.getElementById('statusSummary');
+            if (summary) {
+                summary.innerHTML = `
+                    <strong>Document Overview:</strong> 
+                    ${result.available_count} Available • 
+                    ${result.missing_count} Missing • 
+                    ${result.total_countries} Total Countries
+                `;
+                console.log('DEBUG: Status summary updated');
+            } else {
+                console.error('ERROR: statusSummary element not found');
+            }
+        }
+        
+        function renderDocumentList() {
+            console.log('DEBUG: renderDocumentList() called');
+            const listContainer = document.getElementById('documentList');
             
-            if (!documentList) {
-                console.error('ERROR: Document list element not found');
+            if (!listContainer) {
+                console.error('ERROR: documentList element not found');
                 return;
             }
             
-            // Show loading state
-            documentList.innerHTML = '<div class="loading-message">Loading documents...</div>';
+            if (documentStatus.length === 0) {
+                console.log('DEBUG: No document status available');
+                listContainer.innerHTML = '<p>No document status available.</p>';
+                return;
+            }
             
-            try {
-                // For now, use mock data - replace with actual API call
-                const documents = await fetchAvailableDocuments();
+            console.log('DEBUG: Rendering', documentStatus.length, 'documents');
+            const listHTML = documentStatus.map(doc => {
+                const isSelected = selectedDocuments.has(doc.iso_code);
+                const statusClass = `status-${doc.status}`;
                 
-                if (documents.length === 0) {
-                    documentList.innerHTML = `
-                        <div class="empty-state">
-                            <div class="empty-state-icon">📄</div>
-                            <p>No documents available</p>
-                            <p style="font-size: 14px; color: #6c757d;">Upload your first document using the section below.</p>
-                        </div>
+                let actions = '';
+                if (doc.status === 'missing') {
+                    actions = `<button class="action-btn upload-btn" onclick="uploadForCountry('${doc.iso_code}')">Upload</button>`;
+                } else if (doc.status === 'available') {
+                    actions = `
+                        <button class="action-btn replace-btn" onclick="replaceForCountry('${doc.iso_code}')">Replace</button>
+                        <button class="action-btn delete-btn" onclick="deleteForCountry('${doc.iso_code}')">Delete</button>
                     `;
-                    selectAllCheckbox.style.display = 'none';
-                    return;
+                } else if (doc.status === 'indexed_only') {
+                    actions = `
+                        <button class="action-btn upload-btn" onclick="uploadForCountry('${doc.iso_code}')">Upload</button>
+                        <button class="action-btn delete-btn" onclick="deleteForCountry('${doc.iso_code}')">Delete</button>
+                    `;
+                } else if (doc.status === 'processing') {
+                    actions = `<span class="processing-text">Processing...</span>`;
                 }
                 
-                // Show select all checkbox
-                selectAllCheckbox.style.display = 'inline-block';
-                
-                // Render document list
-                documentList.innerHTML = documents.map(doc => `
-                    <div class="document-item" data-iso="${doc.iso_code}">
-                        <input type="checkbox" class="doc-checkbox" data-iso="${doc.iso_code}">
+                return `
+                    <div class="document-item ${isSelected ? 'selected' : ''}">
+                        <input type="checkbox" class="doc-checkbox" 
+                               ${isSelected ? 'checked' : ''}
+                               onchange="toggleDocumentSelection('${doc.iso_code}')">
                         <div class="doc-info">
-                            <div class="doc-details">
-                                <div class="doc-filename">${doc.filename}</div>
-                                <div class="doc-country-name">${doc.country_name}</div>
-                            </div>
-                            <div class="doc-status-badge status-${doc.status}">
-                                ${doc.status === 'available' ? '✓ Available' : 
-                                  doc.status === 'processing' ? '⏳ Processing' : 
-                                  '⚠️ Error'}
+                            <div class="doc-country">${doc.country_name} (${doc.iso_code})</div>
+                            <div class="doc-status">
+                                <span class="status-badge ${statusClass}">${doc.status_text}</span>
+                                <div class="doc-actions">${actions}</div>
                             </div>
                         </div>
-                    </div>
-                `).join('');
-                
-                // Add event listeners for checkboxes
-                setupDocumentCheckboxes();
-                
-            } catch (error) {
-                console.error('ERROR: Failed to load documents:', error);
-                documentList.innerHTML = `
-                    <div class="empty-state">
-                        <div class="empty-state-icon">⚠️</div>
-                        <p>Failed to load documents</p>
-                        <p style="font-size: 14px; color: #6c757d;">Please try refreshing or contact support.</p>
                     </div>
                 `;
-            }
+            }).join('');
+            
+            listContainer.innerHTML = listHTML;
+            console.log('DEBUG: Document list rendered successfully');
         }
         
-        async function fetchAvailableDocuments() {
-            // Mock data for now - replace with actual API call
-            // return await fetch('/api/documents').then(r => r.json());
-            
-            // Mock response for testing
-            return [
-                {
-                    iso_code: 'DE',
-                    filename: 'DE.docx',
-                    country_name: 'Germany',
-                    status: 'available',
-                    last_modified: '2024-01-15T10:30:00Z'
-                },
-                {
-                    iso_code: 'FR',
-                    filename: 'FR.docx',
-                    country_name: 'France',
-                    status: 'available',
-                    last_modified: '2024-01-14T15:45:00Z'
-                },
-                {
-                    iso_code: 'CH',
-                    filename: 'CH.docx',
-                    country_name: 'Switzerland',
-                    status: 'processing',
-                    last_modified: '2024-01-16T09:15:00Z'
-                }
-            ];
-        }
-        
-        function setupDocumentCheckboxes() {
-            const selectAllCheckbox = document.getElementById('selectAllCheckbox');
-            const docCheckboxes = document.querySelectorAll('.doc-checkbox');
-            const deleteBtn = document.getElementById('deleteSelectedBtn');
-            
-            // Select all functionality
-            selectAllCheckbox.addEventListener('change', function() {
-                const isChecked = this.checked;
-                docCheckboxes.forEach(checkbox => {
-                    checkbox.checked = isChecked;
-                    updateDocumentItemSelection(checkbox);
-                });
-                updateDeleteButtonState();
-            });
-            
-            // Individual checkbox functionality
-            docCheckboxes.forEach(checkbox => {
-                checkbox.addEventListener('change', function() {
-                    updateDocumentItemSelection(this);
-                    updateSelectAllState();
-                    updateDeleteButtonState();
-                });
-            });
-        }
-        
-        function updateDocumentItemSelection(checkbox) {
-            const documentItem = checkbox.closest('.document-item');
-            if (checkbox.checked) {
-                documentItem.classList.add('selected');
-            } else {
-                documentItem.classList.remove('selected');
-            }
-        }
-        
-        function updateSelectAllState() {
-            const selectAllCheckbox = document.getElementById('selectAllCheckbox');
-            const docCheckboxes = document.querySelectorAll('.doc-checkbox');
-            const checkedBoxes = document.querySelectorAll('.doc-checkbox:checked');
-            
-            if (checkedBoxes.length === 0) {
-                selectAllCheckbox.checked = false;
-                selectAllCheckbox.indeterminate = false;
-            } else if (checkedBoxes.length === docCheckboxes.length) {
-                selectAllCheckbox.checked = true;
-                selectAllCheckbox.indeterminate = false;
-            } else {
-                selectAllCheckbox.checked = false;
-                selectAllCheckbox.indeterminate = true;
-            }
-        }
-        
-        function updateDeleteButtonState() {
-            const deleteBtn = document.getElementById('deleteSelectedBtn');
-            const checkedBoxes = document.querySelectorAll('.doc-checkbox:checked');
-            
-            if (checkedBoxes.length > 0) {
-                deleteBtn.disabled = false;
-                deleteBtn.textContent = `🗑️ Delete Selected Documents (${checkedBoxes.length})`;
-            } else {
-                deleteBtn.disabled = true;
-                deleteBtn.textContent = '🗑️ Delete Selected Documents';
-            }
-        }
-        
-        async function deleteSelectedDocuments() {
-            const checkedBoxes = document.querySelectorAll('.doc-checkbox:checked');
-            
-            if (checkedBoxes.length === 0) {
-                return;
-            }
-            
-            const selectedCountries = Array.from(checkedBoxes).map(cb => cb.dataset.iso);
-            const confirmMessage = `Are you sure you want to delete ${selectedCountries.length} document(s)?\n\nCountries: ${selectedCountries.join(', ')}\n\nThis action cannot be undone.`;
-            
-            if (!confirm(confirmMessage)) {
-                return;
-            }
-            
-            try {
-                showModalStatus('Deleting selected documents...', 'info');
-                
-                // Mock deletion - replace with actual API calls
-                for (const isoCode of selectedCountries) {
-                    console.log(`DEBUG: Deleting document for ${isoCode}`);
-                    // await deleteDocument(isoCode);
-                }
-                
-                showModalStatus(`Successfully deleted ${selectedCountries.length} document(s)`, 'success');
-                
-                // Reload the document list
-                setTimeout(() => {
-                    loadAvailableDocuments();
-                }, 1000);
-                
-            } catch (error) {
-                console.error('ERROR: Failed to delete documents:', error);
-                showModalStatus('Failed to delete selected documents. Please try again.', 'error');
-            }
-        }
-        
-        function validateFilename(filename) {
-            // ISO 3166-1 alpha-2 country codes pattern
-            const isoPattern = /^[A-Z]{2}\.docx$/i;
-            return isoPattern.test(filename);
-        }
-        
-        function getCountryNameFromISO(isoCode) {
-            // Basic country name mapping - expand as needed
-            const countryNames = {
-                'DE': 'Germany',
-                'FR': 'France',
-                'CH': 'Switzerland',
-                'AT': 'Austria',
-                'IT': 'Italy',
-                'ES': 'Spain',
-                'NL': 'Netherlands',
-                'BE': 'Belgium',
-                'LU': 'Luxembourg',
-                'GB': 'United Kingdom',
-                'US': 'United States',
-                // Add more as needed
-            };
-            
-            return countryNames[isoCode.toUpperCase()] || `Country (${isoCode.toUpperCase()})`;
-        }
-        
-        function showModalStatus(message, type = 'info') {
+        function showModalStatus(message, type) {
+            console.log('DEBUG: showModalStatus called:', message, type);
             const statusEl = document.getElementById('modalStatus');
-            
-            if (!statusEl) {
+            if (statusEl) {
+                statusEl.textContent = message;
+                statusEl.className = `status-message ${type}`;
+                console.log('DEBUG: Modal status updated');
+            } else {
                 console.error('ERROR: modalStatus element not found');
-                return;
-            }
-            
-            statusEl.textContent = message;
-            statusEl.className = `status-message status-${type}`;
-            statusEl.style.display = 'block';
-            
-            // Auto-hide success/info messages after 3 seconds
-            if (type === 'success' || type === 'info') {
-                setTimeout(() => {
-                    statusEl.style.display = 'none';
-                }, 3000);
             }
         }
         
-        // Minimal working implementation for answer button
+        // Placeholder functions for individual actions
+        function uploadForCountry(isoCode) {
+            console.log('DEBUG: uploadForCountry called for:', isoCode);
+            alert(`Upload functionality for ${isoCode} - Coming soon!`);
+        }
+        
+        function replaceForCountry(isoCode) {
+            console.log('DEBUG: replaceForCountry called for:', isoCode);
+            alert(`Replace functionality for ${isoCode} - Coming soon!`);
+        }
+        
+        function deleteForCountry(isoCode) {
+            console.log('DEBUG: deleteForCountry called for:', isoCode);
+            alert(`Delete functionality for ${isoCode} - Coming soon!`);
+        }
+        
+        function toggleDocumentSelection(isoCode) {
+            console.log('DEBUG: toggleDocumentSelection called for:', isoCode);
+            if (selectedDocuments.has(isoCode)) {
+                selectedDocuments.delete(isoCode);
+            } else {
+                selectedDocuments.add(isoCode);
+            }
+            renderDocumentList();
+        }
+        
+        // Initialize when DOM is ready
         document.addEventListener('DOMContentLoaded', function() {
-            console.log('Answer button script loaded');
-            
+            console.log('DEBUG: DOMContentLoaded event fired');
             const askButton = document.getElementById('askButton');
             const questionInput = document.getElementById('question');
             const responseArea = document.getElementById('response-area');
@@ -1068,14 +819,8 @@
             const countryHeaderContainer = document.getElementById('country-header-container');
             const refinedAnswerContainer = document.getElementById('refined-answer-container');
             
-            if (!askButton || !questionInput) {
-                console.error('Required elements not found');
-                return;
-            }
-            
-            askButton.addEventListener('click', async function() {
-                console.log('Button clicked');
-                
+            console.log('DEBUG: Setting up askButton event listener');
+            askButton.addEventListener('click', async () => {
                 const question = questionInput.value.trim();
                 if (!question) {
                     alert('Please enter a question.');
@@ -1089,51 +834,44 @@
             fullJsonResponseDiv.textContent = 'Please wait, fetching the answer...';
             refinedAnswerContainer.innerHTML = '';
 
-                try {
-                    const response = await fetch('/api/ask', {
-                        method: 'POST',
-                        headers: {
-                            'Content-Type': 'application/json'
-                        },
-                        body: JSON.stringify({ question })
-                    });
+            try {
+                const response = await fetch('/api/ask', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({ question })
+                });
 
-                    const responseText = await response.text();
-                    console.log('API Response Status:', response.status);
-                    console.log('API Response Text:', responseText);
+                if (response.ok) {
+                    const data = await response.json(); // Parse the JSON response
+                    
+                    console.log('DEBUG: API result:', data);
 
-                    if (response.ok) {
-                        try {
-                            const data = JSON.parse(responseText);
-                            console.log('Parsed API result:', data);
+                    // Display the full raw JSON for debugging
+                    fullJsonResponseDiv.textContent = JSON.stringify(data, null, 2);
 
-                            // Display the full raw JSON for debugging
-                            fullJsonResponseDiv.textContent = JSON.stringify(data, null, 2);
-
-                            // Display the country header
-                            if (data && data.country_header) {
-                                countryHeaderContainer.innerHTML = marked.parse(data.country_header);
-                            } else {
-                                countryHeaderContainer.innerHTML = ''; // Clear it if not present
-                            }
-
-                            // Render the refined answer markdown into its container
-                            if (data && data.refined_answer) {
-                                refinedAnswerContainer.innerHTML = marked.parse(data.refined_answer);
-                            } else {
-                                refinedAnswerContainer.textContent = 'No refined answer found in the response.';
-                            }
-                        } catch (parseError) {
-                            console.error('JSON Parse Error:', parseError);
-                            fullJsonResponseDiv.textContent = `JSON Parse Error: ${parseError.message}\n\nRaw Response:\n${responseText}`;
-                            refinedAnswerContainer.innerHTML = '';
-                        }
+                    // Display the country header
+                    if (data && data.country_header) {
+                        countryHeaderContainer.innerHTML = marked.parse(data.country_header);
                     } else {
-                        console.error('HTTP Error:', response.status);
-                        fullJsonResponseDiv.textContent = `HTTP Error ${response.status}:\n${responseText}`;
-                        refinedAnswerContainer.innerHTML = '';
+                        countryHeaderContainer.innerHTML = ''; // Clear it if not present
                     }
-                } catch (error) {
+
+                    // Render the refined answer markdown into its container
+                    if (data && data.refined_answer) {
+                        refinedAnswerContainer.innerHTML = marked.parse(data.refined_answer);
+                    } else {
+                        refinedAnswerContainer.textContent = 'No refined answer found in the response.';
+                    }
+                } else {
+                    const errorText = await response.text();
+                    console.error('ERROR: HTTP response not OK:', response.status);
+                    console.error('ERROR: Response text:', errorText);
+                    fullJsonResponseDiv.textContent = `An error occurred: ${errorText}`;
+                    refinedAnswerContainer.innerHTML = ''; // Clear the refined answer area
+                }
+            } catch (error) {
                 console.error('ERROR: Exception in askButton event listener:', error);
                 fullJsonResponseDiv.textContent = 'Failed to fetch the answer. Please check your connection and try again.';
                 countryHeaderContainer.innerHTML = '';
@@ -1143,54 +881,28 @@
                 askButton.disabled = false;
                 askButton.textContent = 'Answer';
             }
+        });
+        
+            // Complete the askButton event listener and close DOMContentLoaded
+            });
             
             // Initialize document management modal event listeners
             const modal = document.getElementById('documentManagementModal');
             if (modal) {
                 const closeButtons = modal.querySelectorAll('.close');
-                closeButtons.forEach(button => {
-                    button.addEventListener('click', closeDocumentManagement);
+                closeButtons.forEach(btn => {
+                    btn.onclick = closeDocumentManagement;
                 });
                 
                 // Close modal when clicking outside
-                window.addEventListener('click', function(event) {
+                window.onclick = (event) => {
                     if (event.target === modal) {
                         closeDocumentManagement();
                     }
-                });
-                
-                // Refresh documents button
-                const refreshBtn = document.getElementById('refreshDocumentsBtn');
-                if (refreshBtn) {
-                    refreshBtn.addEventListener('click', loadAvailableDocuments);
-                }
-                
-                // Delete selected button
-                const deleteBtn = document.getElementById('deleteSelectedBtn');
-                if (deleteBtn) {
-                    deleteBtn.addEventListener('click', deleteSelectedDocuments);
-                }
-                
-                // File upload functionality (keep existing upload logic)
-                const fileInput = document.getElementById('fileInput');
-                const browseBtn = document.getElementById('browseBtn');
-                const dropZone = document.getElementById('dropZone');
-                
-                if (browseBtn && fileInput) {
-                    browseBtn.addEventListener('click', () => fileInput.click());
-                }
-                
-                if (fileInput) {
-                    fileInput.addEventListener('change', handleFileSelection);
-                }
-                
-                if (dropZone) {
-                    dropZone.addEventListener('dragover', handleDragOver);
-                    dropZone.addEventListener('drop', handleFileDrop);
-                }
+                };
             }
-        
-        console.log('DEBUG: Document management initialization complete');
+            
+            console.log('DEBUG: Document management initialization complete');
         });
         
         // Helper function to show status messages
@@ -1212,4 +924,3 @@
     </script>
 </body>
 </html>
-
