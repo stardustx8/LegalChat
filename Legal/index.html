@@ -1089,44 +1089,51 @@
             fullJsonResponseDiv.textContent = 'Please wait, fetching the answer...';
             refinedAnswerContainer.innerHTML = '';
 
-            try {
-                const response = await fetch('/api/ask', {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json'
-                    },
-                    body: JSON.stringify({ question })
-                });
+                try {
+                    const response = await fetch('/api/ask', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json'
+                        },
+                        body: JSON.stringify({ question })
+                    });
 
-                if (response.ok) {
-                    const data = await response.json(); // Parse the JSON response
-                    
-                    console.log('DEBUG: API result:', data);
+                    const responseText = await response.text();
+                    console.log('API Response Status:', response.status);
+                    console.log('API Response Text:', responseText);
 
-                    // Display the full raw JSON for debugging
-                    fullJsonResponseDiv.textContent = JSON.stringify(data, null, 2);
+                    if (response.ok) {
+                        try {
+                            const data = JSON.parse(responseText);
+                            console.log('Parsed API result:', data);
 
-                    // Display the country header
-                    if (data && data.country_header) {
-                        countryHeaderContainer.innerHTML = marked.parse(data.country_header);
+                            // Display the full raw JSON for debugging
+                            fullJsonResponseDiv.textContent = JSON.stringify(data, null, 2);
+
+                            // Display the country header
+                            if (data && data.country_header) {
+                                countryHeaderContainer.innerHTML = marked.parse(data.country_header);
+                            } else {
+                                countryHeaderContainer.innerHTML = ''; // Clear it if not present
+                            }
+
+                            // Render the refined answer markdown into its container
+                            if (data && data.refined_answer) {
+                                refinedAnswerContainer.innerHTML = marked.parse(data.refined_answer);
+                            } else {
+                                refinedAnswerContainer.textContent = 'No refined answer found in the response.';
+                            }
+                        } catch (parseError) {
+                            console.error('JSON Parse Error:', parseError);
+                            fullJsonResponseDiv.textContent = `JSON Parse Error: ${parseError.message}\n\nRaw Response:\n${responseText}`;
+                            refinedAnswerContainer.innerHTML = '';
+                        }
                     } else {
-                        countryHeaderContainer.innerHTML = ''; // Clear it if not present
+                        console.error('HTTP Error:', response.status);
+                        fullJsonResponseDiv.textContent = `HTTP Error ${response.status}:\n${responseText}`;
+                        refinedAnswerContainer.innerHTML = '';
                     }
-
-                    // Render the refined answer markdown into its container
-                    if (data && data.refined_answer) {
-                        refinedAnswerContainer.innerHTML = marked.parse(data.refined_answer);
-                    } else {
-                        refinedAnswerContainer.textContent = 'No refined answer found in the response.';
-                    }
-                } else {
-                    const errorText = await response.text();
-                    console.error('ERROR: HTTP response not OK:', response.status);
-                    console.error('ERROR: Response text:', errorText);
-                    fullJsonResponseDiv.textContent = `An error occurred: ${errorText}`;
-                    refinedAnswerContainer.innerHTML = ''; // Clear the refined answer area
-                }
-            } catch (error) {
+                } catch (error) {
                 console.error('ERROR: Exception in askButton event listener:', error);
                 fullJsonResponseDiv.textContent = 'Failed to fetch the answer. Please check your connection and try again.';
                 countryHeaderContainer.innerHTML = '';
