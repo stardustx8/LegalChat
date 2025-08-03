@@ -1,0 +1,63 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Test Answer Button</title>
+</head>
+<body>
+    <h1>Legal RAG Assistant - Test</h1>
+    <textarea id="question" placeholder="Ask a question..."></textarea>
+    <button id="askButton">Answer</button>
+    <div id="response-area" style="display:none;">
+        <h2>Response:</h2>
+        <div id="result"></div>
+    </div>
+
+    <script>
+        document.addEventListener('DOMContentLoaded', function() {
+            console.log('Test page loaded');
+            
+            const askButton = document.getElementById('askButton');
+            const questionInput = document.getElementById('question');
+            const responseArea = document.getElementById('response-area');
+            const resultDiv = document.getElementById('result');
+            
+            askButton.addEventListener('click', async function() {
+                console.log('Button clicked!');
+                
+                const question = questionInput.value.trim();
+                if (!question) {
+                    alert('Please enter a question.');
+                    return;
+                }
+                
+                askButton.disabled = true;
+                askButton.textContent = 'Thinking...';
+                responseArea.style.display = 'block';
+                resultDiv.textContent = 'Loading...';
+                
+                try {
+                    const response = await fetch('/api/ask', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ question })
+                    });
+                    
+                    if (response.ok) {
+                        const data = await response.json();
+                        resultDiv.textContent = JSON.stringify(data, null, 2);
+                    } else {
+                        const errorText = await response.text();
+                        resultDiv.textContent = `Error: ${errorText}`;
+                    }
+                } catch (error) {
+                    console.error('Error:', error);
+                    resultDiv.textContent = `Error: ${error.message}`;
+                } finally {
+                    askButton.disabled = false;
+                    askButton.textContent = 'Answer';
+                }
+            });
+        });
+    </script>
+</body>
+</html>

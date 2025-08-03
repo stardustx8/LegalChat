@@ -1057,9 +1057,10 @@
             }
         }
         
-        // Initialize when DOM is ready
+        // Minimal working implementation for answer button
         document.addEventListener('DOMContentLoaded', function() {
-            console.log('DEBUG: DOMContentLoaded event fired');
+            console.log('Answer button script loaded');
+            
             const askButton = document.getElementById('askButton');
             const questionInput = document.getElementById('question');
             const responseArea = document.getElementById('response-area');
@@ -1067,27 +1068,16 @@
             const countryHeaderContainer = document.getElementById('country-header-container');
             const refinedAnswerContainer = document.getElementById('refined-answer-container');
             
-            console.log('DEBUG: Elements found:', {
-                askButton: !!askButton,
-                questionInput: !!questionInput,
-                responseArea: !!responseArea,
-                fullJsonResponseDiv: !!fullJsonResponseDiv,
-                countryHeaderContainer: !!countryHeaderContainer,
-                refinedAnswerContainer: !!refinedAnswerContainer
-            });
-            
-            if (!askButton) {
-                console.error('ERROR: askButton not found!');
+            if (!askButton || !questionInput) {
+                console.error('Required elements not found');
                 return;
             }
             
-            console.log('DEBUG: Setting up askButton event listener');
-            askButton.addEventListener('click', async () => {
-                console.log('DEBUG: Answer button clicked!');
+            askButton.addEventListener('click', async function() {
+                console.log('Button clicked');
+                
                 const question = questionInput.value.trim();
-                console.log('DEBUG: Question value:', question);
                 if (!question) {
-                    console.log('DEBUG: No question entered, showing alert');
                     alert('Please enter a question.');
                     return;
                 }
