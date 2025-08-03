@@ -1,5 +1,5 @@
 import logging
-import os, json, requests, re, time
+import os, json, requests, re
 import azure.functions as func
 from openai import AzureOpenAI
 
@@ -162,11 +162,9 @@ def retrieve(query: str, iso_codes: list[str], client: AzureOpenAI, config: dict
         return []
     
     try:
-        logging.info("DEBUG: Step 2 - Generating embedding for query...")
-        step2_start = time.time()
+        logging.info("DEBUG: Generating embedding for query...")
         vec = embed(query, client, config['deploy_embed'])
-        step2_time = time.time() - step2_start
-        logging.info(f"DEBUG: Embedding generated successfully in {step2_time:.2f}s, length={len(vec)}")
+        logging.info(f"DEBUG: Embedding generated successfully, length={len(vec)}")
     except Exception as e:
         logging.error(f"DEBUG: Failed to generate embedding: {e}")
         raise
@@ -197,14 +195,11 @@ def retrieve(query: str, iso_codes: list[str], client: AzureOpenAI, config: dict
     logging.info(f"DEBUG: Payload keys: {list(payload.keys())}")
     
     try:
-        step3_start = time.time()
-        logging.info("DEBUG: Step 3 - Performing vector search")
         response = requests.post(search_url, headers=headers, json=payload)
-        step3_time = time.time() - step3_start
         logging.info(f"DEBUG: Search response status: {response.status_code}")
         response.raise_for_status()
         raw_results = response.json().get('value', [])
-        logging.info(f"DEBUG: Vector search completed, found {len(raw_results)} results in {step3_time:.2f}s")
+        logging.info(f"DEBUG: Raw search returned {len(raw_results)} documents")
         
         # For multi-country queries, ensure balanced representation
         if len(iso_codes) > 1 and raw_results:
@@ -254,52 +249,6 @@ def build_response_header(iso_codes: list[str], found_iso_codes: set[str]) -> st
     
     # Combine the main header and the table
     return f"{main_header}\n\n{table}\n\n---\n\n"
-
-GRADER_DRAFTER_PROMPT = """
-You are a legal research assistant specializing in knife law analysis. Your task is to draft a comprehensive answer based on the provided legal context.
-
-## WORKFLOW
-
-### Step 1: Analyze Context
-- Review all provided legal sources carefully
-- Identify relevant jurisdictions and their specific rules
-- Note any exceptions, exemptions, or special conditions
-
-### Step 2: Draft Answer
-Create a structured response with exactly two sections:
-
-**## TL;DR Summary**
-- Provide bullet points with key legal facts
-- Include specific measurements, age limits, penalties when mentioned
-- Start each bullet with a bold key phrase
-- Be precise about jurisdictional differences
-
-**## Detailed Explanation**
-- Provide flowing prose explanation
-- Include all relevant legal details from the context
-- Explain any jurisdictional variations clearly
-- Maintain professional, clear language
-
-### Step 3: Citation Policy
-- Present information in clear, professional language
-- Only include citations that appear naturally within source documents
-- Do NOT add technical chunk references
-
-### Step 4: JSON Response
-Return your response in this exact JSON format:
-```json
-{
-  "answer": "## TL;DR Summary\n\n• **[Key Point]**: [Details]\n\n## Detailed Explanation\n\n[Comprehensive explanation...]"
-}
-```
-
-## QUALITY REQUIREMENTS
-- Be comprehensive but concise
-- Include all relevant legal facts from the provided context
-- Maintain accuracy to source material
-- Use professional legal language
-- Ensure both sections are well-structured
-"""
 
 GRADER_REFINER_PROMPT = """
 You are a specialized legal document evaluator and refiner. Your task is to systematically evaluate a draft answer against source documents and produce an improved version.
@@ -412,10 +361,8 @@ Provide a JSON response with this exact structure:
 - Present information professionally without technical chunk citations
 """
 
-def chat(question, client, config):
-    """Main RAG chat function that processes a question and returns an answer."""
-    import time
-    chat_start_time = time.time()
+def chat(question: str, client: AzureOpenAI, config: dict) -> str:
+    """Orchestrates the RAG pipeline to answer a question."""
     logging.info("DEBUG: Starting chat function")
     
     try:
@@ -550,60 +497,31 @@ def chat(question, client, config):
   ]
 }
         """
-        # Build structured context with source mapping for systematic evaluation (OPTIMIZED)
+        # Build structured context with source mapping for systematic evaluation
         structured_context = []
-        total_context_chars = 0
-        max_context_chars = 12000  # Optimize context length for faster processing
-        
         for i, chunk in enumerate(chunks):
-            chunk_text = f"**SOURCE {i+1}: KL {chunk['iso_code']} (Document Section)**\n{chunk['chunk']}"
-            if total_context_chars + len(chunk_text) > max_context_chars:
-                logging.info(f"DEBUG: Context truncated at {total_context_chars} chars for performance")
-                break
-            structured_context.append(chunk_text)
-            total_context_chars += len(chunk_text)
+            structured_context.append(f"**SOURCE {i+1}: KL {chunk['iso_code']} (Document Section)**\n{chunk['chunk']}")
         
         context = "\n\n---\n\n".join(structured_context)
-        logging.info(f"DEBUG: Structured context built with {len(structured_context)} sources, {len(context)} characters")
+        logging.info(f"DEBUG: Structured context built with {len(chunks)} sources, {len(context)} characters")
         # Build jurisdiction list for logging
         jurisdiction_list = [f"KL {chunk['iso_code']}" for chunk in chunks]
         logging.info(f"DEBUG: Sources by jurisdiction: {jurisdiction_list}")
         logging.info(f"DEBUG: Jurisdiction-aware evaluation will expect comprehensive coverage of: {iso_codes}")
         
-        # --- Step 1: Draft Answer (OPTIMIZED: Efficient prompting with GPT-4.1) ---
+        # --- Step 1: Draft Answer ---
         logging.info("DEBUG: Step 4 - Calling OpenAI for draft answer...")
-        draft_start_time = time.time()
         try:
-            # Use GPT-4.1 with optimized prompting for efficiency
-            draft_model = config['deploy_chat']  # Use available GPT-4.1 deployment
-            
-            # Build optimized drafter message
-            drafter_user_message = f"Context:\n{context}\n\nQuestion: {question}"
-            
             draft_resp = client.chat.completions.create(
-                model=draft_model,
-                response_format={"type": "json_object"},
+                model=config['deploy_chat'],
                 messages=[
-                    {"role": "system", "content": GRADER_DRAFTER_PROMPT},
-                    {"role": "user", "content": drafter_user_message}
+                    {"role": "system", "content": drafter_system_message},
+                    {"role": "user", "content": f"Context:\n{context}\n\nQuestion: {question}"}
                 ],
-                temperature=0.0,
-                max_tokens=1800,  # Optimized token limit for drafting
+                temperature=0.0, # Keep draft deterministic
             )
-            draft_output_json = draft_resp.choices[0].message.content.strip()
-            draft_time = time.time() - draft_start_time
-            logging.info(f"DEBUG: Draft answer generated successfully in {draft_time:.2f}s using {draft_model}")
-            
-            # Parse the draft JSON to extract the answer
-            try:
-                draft_data = json.loads(draft_output_json)
-                draft_answer = draft_data.get('answer', draft_output_json)  # Fallback to raw if no 'answer' key
-                logging.info("DEBUG: Draft JSON parsed successfully")
-            except json.JSONDecodeError:
-                # If JSON parsing fails, use the raw response
-                draft_answer = draft_output_json
-                logging.warning("DEBUG: Draft JSON parsing failed, using raw response")
-                
+            draft_answer = draft_resp.choices[0].message.content.strip()
+            logging.info("DEBUG: Draft answer generated successfully")
         except Exception as draft_error:
             logging.error(f"DEBUG: Draft step failed: {draft_error}")
             raise
@@ -640,48 +558,26 @@ Be extremely precise - only flag content as "missing" if genuinely absent, not j
 """
         logging.info(f"DEBUG: Systematic evaluation message length: {len(refiner_user_message)} characters")
         
-        # Check if context is too long for the refiner (OPTIMIZED: context window management)
-        context_lines = context.split('\n')
-        if len(context) > 12000:  # Optimized limit for faster processing
-            logging.info(f"DEBUG: Context too long ({len(context)} chars), truncating for systematic evaluation")
-            truncated_lines = context_lines[:int(len(context_lines) * 0.75)]  # Keep 75% of context
+        # Conservative token limit for systematic evaluation with structured context
+        if len(refiner_user_message) > 40000:
+            logging.warning("DEBUG: Message too long for systematic evaluation, truncating context")
+            # Preserve source structure while truncating
+            context_lines = context.split('\n')
+            truncated_lines = context_lines[:int(len(context_lines) * 0.7)]  # Keep 70% of context
             context = '\n'.join(truncated_lines) + "\n\n[Context truncated for systematic evaluation]"
-            # Rebuild refiner message with truncated context
-            refiner_user_message = f"""Context:
-{context}
 
-Draft Answer (with header):
-{draft_with_header}
-
-Question: {question}
-
-Apply the systematic evaluation methodology to:
-1. Extract all relevant legal facts from the context
-2. Check which facts are present/missing in the draft
-3. Verify source support for all draft claims
-4. Calculate objective recall/precision metrics
-5. Produce a comprehensive refined answer
-
-Be extremely precise - only flag content as "missing" if genuinely absent, not just differently worded.
-"""
-
-        refine_start_time = time.time()
         try:
-            # Use GPT-4.1 for refinement with optimized token allocation
-            refine_model = config['deploy_chat']  # GPT-4.1 deployment
             refine_resp = client.chat.completions.create(
-                model=refine_model,
+                model=config['deploy_chat'], # Use the best model for this complex task
                 response_format={"type": "json_object"},
                 messages=[
                     {"role": "system", "content": GRADER_REFINER_PROMPT},
                     {"role": "user", "content": refiner_user_message}
                 ],
                 temperature=0.0,
-                max_tokens=2500,  # Optimized tokens for refinement
             )
             refined_output_json = refine_resp.choices[0].message.content.strip()
-            refine_time = time.time() - refine_start_time
-            logging.info(f"DEBUG: Refined answer generated successfully in {refine_time:.2f}s using {refine_model}")
+            logging.info("DEBUG: Refined answer generated successfully")
         except Exception as refine_error:
             logging.error(f"DEBUG: Refine step failed: {refine_error}")
             raise
@@ -748,14 +644,6 @@ Be extremely precise - only flag content as "missing" if genuinely absent, not j
         }
         
         logging.info("DEBUG: Systematic evaluation pipeline completed")
-        total_time = time.time() - chat_start_time
-        final_response = {
-            "country_header": header,
-            "refined_answer": answer
-        }
-        
-        logging.info(f"DEBUG: Chat function completed successfully in {total_time:.2f}s")
-        logging.info(f"DEBUG: Performance breakdown - Draft: {draft_time:.2f}s, Refine: {refine_time:.2f}s, Total: {total_time:.2f}s")
         return json.dumps(final_response, indent=2)
         
     except Exception as e:
