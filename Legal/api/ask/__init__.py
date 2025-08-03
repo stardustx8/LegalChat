@@ -504,26 +504,34 @@ def chat(question, client, config):
   ]
 }
         """
-        # Build structured context with source mapping for systematic evaluation
+        # Build structured context with source mapping for systematic evaluation (OPTIMIZED)
         structured_context = []
+        total_context_chars = 0
+        max_context_chars = 12000  # Optimize context length for faster processing
+        
         for i, chunk in enumerate(chunks):
-            structured_context.append(f"**SOURCE {i+1}: KL {chunk['iso_code']} (Document Section)**\n{chunk['chunk']}")
+            chunk_text = f"**SOURCE {i+1}: KL {chunk['iso_code']} (Document Section)**\n{chunk['chunk']}"
+            if total_context_chars + len(chunk_text) > max_context_chars:
+                logging.info(f"DEBUG: Context truncated at {total_context_chars} chars for performance")
+                break
+            structured_context.append(chunk_text)
+            total_context_chars += len(chunk_text)
         
         context = "\n\n---\n\n".join(structured_context)
-        logging.info(f"DEBUG: Structured context built with {len(chunks)} sources, {len(context)} characters")
+        logging.info(f"DEBUG: Structured context built with {len(structured_context)} sources, {len(context)} characters")
         # Build jurisdiction list for logging
         jurisdiction_list = [f"KL {chunk['iso_code']}" for chunk in chunks]
         logging.info(f"DEBUG: Sources by jurisdiction: {jurisdiction_list}")
         logging.info(f"DEBUG: Jurisdiction-aware evaluation will expect comprehensive coverage of: {iso_codes}")
         
-        # --- Step 1: Draft Answer (OPTIMIZED: Use faster model) ---
+        # --- Step 1: Draft Answer (OPTIMIZED: Efficient prompting with GPT-4.1) ---
         logging.info("DEBUG: Step 4 - Calling OpenAI for draft answer...")
         draft_start_time = time.time()
         try:
-            # Use faster model for initial drafting to reduce latency
-            draft_model = config.get('deploy_chat_fast', 'gpt-35-turbo')  # Use GPT-3.5-turbo for speed
+            # Use GPT-4.1 with optimized prompting for efficiency
+            draft_model = config['deploy_chat']  # Use available GPT-4.1 deployment
             
-            # Build drafter message
+            # Build optimized drafter message
             drafter_user_message = f"Context:\n{context}\n\nQuestion: {question}"
             
             draft_resp = client.chat.completions.create(
@@ -534,7 +542,7 @@ def chat(question, client, config):
                     {"role": "user", "content": drafter_user_message}
                 ],
                 temperature=0.0,
-                max_tokens=2000,  # Limit tokens for faster response
+                max_tokens=1800,  # Optimized token limit for drafting
             )
             draft_output_json = draft_resp.choices[0].message.content.strip()
             draft_time = time.time() - draft_start_time
@@ -586,18 +594,35 @@ Be extremely precise - only flag content as "missing" if genuinely absent, not j
 """
         logging.info(f"DEBUG: Systematic evaluation message length: {len(refiner_user_message)} characters")
         
-        # Conservative token limit for systematic evaluation with structured context
-        if len(refiner_user_message) > 40000:
-            logging.warning("DEBUG: Message too long for systematic evaluation, truncating context")
-            # Preserve source structure while truncating
-            context_lines = context.split('\n')
-            truncated_lines = context_lines[:int(len(context_lines) * 0.7)]  # Keep 70% of context
+        # Check if context is too long for the refiner (OPTIMIZED: context window management)
+        context_lines = context.split('\n')
+        if len(context) > 12000:  # Optimized limit for faster processing
+            logging.info(f"DEBUG: Context too long ({len(context)} chars), truncating for systematic evaluation")
+            truncated_lines = context_lines[:int(len(context_lines) * 0.75)]  # Keep 75% of context
             context = '\n'.join(truncated_lines) + "\n\n[Context truncated for systematic evaluation]"
+            # Rebuild refiner message with truncated context
+            refiner_user_message = f"""Context:
+{context}
+
+Draft Answer (with header):
+{draft_with_header}
+
+Question: {question}
+
+Apply the systematic evaluation methodology to:
+1. Extract all relevant legal facts from the context
+2. Check which facts are present/missing in the draft
+3. Verify source support for all draft claims
+4. Calculate objective recall/precision metrics
+5. Produce a comprehensive refined answer
+
+Be extremely precise - only flag content as "missing" if genuinely absent, not just differently worded.
+"""
 
         refine_start_time = time.time()
         try:
-            # Use premium model for final refinement to maintain quality
-            refine_model = config['deploy_chat']  # Keep GPT-4.1 for quality
+            # Use GPT-4.1 for refinement with optimized token allocation
+            refine_model = config['deploy_chat']  # GPT-4.1 deployment
             refine_resp = client.chat.completions.create(
                 model=refine_model,
                 response_format={"type": "json_object"},
@@ -606,7 +631,7 @@ Be extremely precise - only flag content as "missing" if genuinely absent, not j
                     {"role": "user", "content": refiner_user_message}
                 ],
                 temperature=0.0,
-                max_tokens=3000,  # Adequate tokens for refinement
+                max_tokens=2500,  # Optimized tokens for refinement
             )
             refined_output_json = refine_resp.choices[0].message.content.strip()
             refine_time = time.time() - refine_start_time
