@@ -162,9 +162,11 @@ def retrieve(query: str, iso_codes: list[str], client: AzureOpenAI, config: dict
         return []
     
     try:
-        logging.info("DEBUG: Generating embedding for query...")
+        logging.info("DEBUG: Step 2 - Generating embedding for query...")
+        step2_start = time.time()
         vec = embed(query, client, config['deploy_embed'])
-        logging.info(f"DEBUG: Embedding generated successfully, length={len(vec)}")
+        step2_time = time.time() - step2_start
+        logging.info(f"DEBUG: Embedding generated successfully in {step2_time:.2f}s, length={len(vec)}")
     except Exception as e:
         logging.error(f"DEBUG: Failed to generate embedding: {e}")
         raise
@@ -195,11 +197,14 @@ def retrieve(query: str, iso_codes: list[str], client: AzureOpenAI, config: dict
     logging.info(f"DEBUG: Payload keys: {list(payload.keys())}")
     
     try:
+        step3_start = time.time()
+        logging.info("DEBUG: Step 3 - Performing vector search")
         response = requests.post(search_url, headers=headers, json=payload)
+        step3_time = time.time() - step3_start
         logging.info(f"DEBUG: Search response status: {response.status_code}")
         response.raise_for_status()
         raw_results = response.json().get('value', [])
-        logging.info(f"DEBUG: Raw search returned {len(raw_results)} documents")
+        logging.info(f"DEBUG: Vector search completed, found {len(raw_results)} results in {step3_time:.2f}s")
         
         # For multi-country queries, ensure balanced representation
         if len(iso_codes) > 1 and raw_results:
@@ -361,8 +366,10 @@ Provide a JSON response with this exact structure:
 - Present information professionally without technical chunk citations
 """
 
-def chat(question: str, client: AzureOpenAI, config: dict) -> str:
-    """Orchestrates the RAG pipeline to answer a question."""
+def chat(question, client, config):
+    """Main RAG chat function that processes a question and returns an answer."""
+    import time
+    chat_start_time = time.time()
     logging.info("DEBUG: Starting chat function")
     
     try:
@@ -509,19 +516,40 @@ def chat(question: str, client: AzureOpenAI, config: dict) -> str:
         logging.info(f"DEBUG: Sources by jurisdiction: {jurisdiction_list}")
         logging.info(f"DEBUG: Jurisdiction-aware evaluation will expect comprehensive coverage of: {iso_codes}")
         
-        # --- Step 1: Draft Answer ---
+        # --- Step 1: Draft Answer (OPTIMIZED: Use faster model) ---
         logging.info("DEBUG: Step 4 - Calling OpenAI for draft answer...")
+        draft_start_time = time.time()
         try:
+            # Use faster model for initial drafting to reduce latency
+            draft_model = config.get('deploy_chat_fast', 'gpt-35-turbo')  # Use GPT-3.5-turbo for speed
+            
+            # Build drafter message
+            drafter_user_message = f"Context:\n{context}\n\nQuestion: {question}"
+            
             draft_resp = client.chat.completions.create(
-                model=config['deploy_chat'],
+                model=draft_model,
+                response_format={"type": "json_object"},
                 messages=[
-                    {"role": "system", "content": drafter_system_message},
-                    {"role": "user", "content": f"Context:\n{context}\n\nQuestion: {question}"}
+                    {"role": "system", "content": GRADER_DRAFTER_PROMPT},
+                    {"role": "user", "content": drafter_user_message}
                 ],
-                temperature=0.0, # Keep draft deterministic
+                temperature=0.0,
+                max_tokens=2000,  # Limit tokens for faster response
             )
-            draft_answer = draft_resp.choices[0].message.content.strip()
-            logging.info("DEBUG: Draft answer generated successfully")
+            draft_output_json = draft_resp.choices[0].message.content.strip()
+            draft_time = time.time() - draft_start_time
+            logging.info(f"DEBUG: Draft answer generated successfully in {draft_time:.2f}s using {draft_model}")
+            
+            # Parse the draft JSON to extract the answer
+            try:
+                draft_data = json.loads(draft_output_json)
+                draft_answer = draft_data.get('answer', draft_output_json)  # Fallback to raw if no 'answer' key
+                logging.info("DEBUG: Draft JSON parsed successfully")
+            except json.JSONDecodeError:
+                # If JSON parsing fails, use the raw response
+                draft_answer = draft_output_json
+                logging.warning("DEBUG: Draft JSON parsing failed, using raw response")
+                
         except Exception as draft_error:
             logging.error(f"DEBUG: Draft step failed: {draft_error}")
             raise
@@ -566,18 +594,23 @@ Be extremely precise - only flag content as "missing" if genuinely absent, not j
             truncated_lines = context_lines[:int(len(context_lines) * 0.7)]  # Keep 70% of context
             context = '\n'.join(truncated_lines) + "\n\n[Context truncated for systematic evaluation]"
 
+        refine_start_time = time.time()
         try:
+            # Use premium model for final refinement to maintain quality
+            refine_model = config['deploy_chat']  # Keep GPT-4.1 for quality
             refine_resp = client.chat.completions.create(
-                model=config['deploy_chat'], # Use the best model for this complex task
+                model=refine_model,
                 response_format={"type": "json_object"},
                 messages=[
                     {"role": "system", "content": GRADER_REFINER_PROMPT},
                     {"role": "user", "content": refiner_user_message}
                 ],
                 temperature=0.0,
+                max_tokens=3000,  # Adequate tokens for refinement
             )
             refined_output_json = refine_resp.choices[0].message.content.strip()
-            logging.info("DEBUG: Refined answer generated successfully")
+            refine_time = time.time() - refine_start_time
+            logging.info(f"DEBUG: Refined answer generated successfully in {refine_time:.2f}s using {refine_model}")
         except Exception as refine_error:
             logging.error(f"DEBUG: Refine step failed: {refine_error}")
             raise
@@ -644,6 +677,14 @@ Be extremely precise - only flag content as "missing" if genuinely absent, not j
         }
         
         logging.info("DEBUG: Systematic evaluation pipeline completed")
+        total_time = time.time() - chat_start_time
+        final_response = {
+            "country_header": header,
+            "refined_answer": answer
+        }
+        
+        logging.info(f"DEBUG: Chat function completed successfully in {total_time:.2f}s")
+        logging.info(f"DEBUG: Performance breakdown - Draft: {draft_time:.2f}s, Refine: {refine_time:.2f}s, Total: {total_time:.2f}s")
         return json.dumps(final_response, indent=2)
         
     except Exception as e:
