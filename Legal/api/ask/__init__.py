@@ -314,6 +314,7 @@ Create an improved answer that:
 - Ensures every claim has proper source support
 - Presents information in a clear, professional manner without technical chunk references
 - Only includes citations that appear naturally within the original source documents
+- **MAINTAINS MARKDOWN STRUCTURE**: Preserve the exact section format with ## Summary and ## Details headings
 
 ## CRITICAL EVALUATION RULES
 
@@ -472,11 +473,12 @@ def chat(question: str, client: AzureOpenAI, config: dict) -> str:
       "must_mention": ["automatic one‑hand opening mechanism (absent)", "tool purpose legitimises carry"],
       "assistant_output": {
         "TL;DR Summary": [
-          "A fixed 20 cm chef’s knife is **not a weapon** because it lacks an automatic one‑hand opening mechanism (KL CH §1.1).",
-          "Transport is lawful when clearly for work and stowed safely; brandishing could re‑classify it as a dangerous object (KL CH §1.3).",
-          "Employers or parking‑lot owners may still ban knives (KL CH §1.4)."
+          "A fixed 20 cm chef’s knife is **not a weapon** because it lacks an automatic one‑hand opening mechanism",
+          "Transport is lawful when clearly for work and stowed safely; brandishing could re‑classify it as a dangerous object.",
+          "Employers or parking‑lot owners may still ban knives.",
+          "You can be punished for misdemeanour (Weapon's Act)."
         ],
-        "Detailed Explanation": "Under the Swiss Weapons Act, only folding or dagger‑type knives meeting the one‑hand‑opening and length thresholds are weapons (KL CH §1.1). A chef’s knife is treated as a tool. Keeping it in a sheath or roll inside the glove box demonstrates legitimate use. Visible or threatening display could trigger the ‘dangerous object’ clause (KL CH §1.3). Venue rules may override federal permissiveness (KL CH §1.4)."
+        "Detailed Explanation": "Under the Swiss Weapons Act, only folding or dagger‑type knives meeting the one‑hand‑opening and length thresholds are weapons. A chef’s knife is treated as a tool. Keeping it in a sheath or roll inside the glove box demonstrates legitimate use. Visible or threatening display could trigger the ‘dangerous object’ clause. The Weapons Act implies misdemeanour penalties. Venue rules may override federal permissiveness. [...]"
       }
     },
     {
@@ -485,11 +487,11 @@ def chat(question: str, client: AzureOpenAI, config: dict) -> str:
       "must_mention": ["automatic one‑hand opening mechanism", "German §42a public‑carry ban", "EU blade > 6 cm aviation limit"],
       "assistant_output": {
         "TL;DR Summary": [
-          "**Switzerland**: Knife is legal if it lacks automatic one‑hand opening and is carried as a tool (KL CH §1.1, §1.3).",
-          "**Germany**: One‑hand lockable knives barred from public carry (§42a Abs 1 WaffG) (KL DE §42a Abs 1).",
-          "**EuroAirport**: EU rule forbids blades > 6 cm in security zones (Reg (EU) 2015/1998 Att 4‑C) (KL CH‑EU‑ASM Art 4)."
+          "**Switzerland**: Knife is legal if it lacks automatic one‑hand opening and is carried as a tool.",
+          "**Germany**: One‑hand lockable knives barred from public carry (§42a Abs 1 WaffG).",
+          "**EuroAirport**: EU rule forbids blades > 6 cm in security zones (Reg (EU) 2015/1998 Att 4‑C)."
         ],
-        "Detailed Explanation": "Swiss law treats non‑one‑hand lockable knives as tools; improper display triggers the dangerous‑object clause (KL CH §1.3). German §42a bans public carry of lockable one‑hand knives unless a statutory exception applies (KL DE §42a Abs 1). EuroAirport enforces EU aviation security rules: blades over 6 cm cannot pass passenger checkpoints (KL CH‑EU‑ASM Art 4)."
+        "Detailed Explanation": "Swiss law treats non‑one‑hand lockable knives as tools; improper display triggers the dangerous‑object clause. German §42a bans public carry of lockable one‑hand knives unless a statutory exception applies. EuroAirport enforces EU aviation security rules: blades over 6 cm cannot pass passenger checkpoints. [...]"
       }
     }
   ]
