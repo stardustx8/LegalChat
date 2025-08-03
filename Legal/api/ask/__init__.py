@@ -1,5 +1,5 @@
 import logging
-import os, json, requests, re
+import os, json, requests, re, time
 import azure.functions as func
 from openai import AzureOpenAI
 
