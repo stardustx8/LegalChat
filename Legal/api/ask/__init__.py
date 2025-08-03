@@ -313,7 +313,7 @@ Create an improved answer that:
 - Includes ALL missing relevant facts from ground truth
 - Preserves all correct elements from the draft
 - Ensures every claim has proper source support
-- Uses precise citations referencing the structured sources: (KL {ISO-code} from SOURCE N)
+- Presents information in a clear, most useful, informative, actionable, professional manner without technical chunk references
 
 ## CRITICAL EVALUATION RULES
 
