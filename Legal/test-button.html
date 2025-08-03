@@ -42,12 +42,20 @@
                         body: JSON.stringify({ question })
                     });
                     
+                    const responseText = await response.text();
+                    console.log('Raw API response:', responseText);
+                    console.log('Response status:', response.status);
+                    console.log('Response headers:', Object.fromEntries(response.headers.entries()));
+                    
                     if (response.ok) {
-                        const data = await response.json();
-                        resultDiv.textContent = JSON.stringify(data, null, 2);
+                        try {
+                            const data = JSON.parse(responseText);
+                            resultDiv.innerHTML = `<pre>${JSON.stringify(data, null, 2)}</pre>`;
+                        } catch (e) {
+                            resultDiv.innerHTML = `<strong>Response (not JSON):</strong><br><pre>${responseText}</pre>`;
+                        }
                     } else {
-                        const errorText = await response.text();
-                        resultDiv.textContent = `Error: ${errorText}`;
+                        resultDiv.innerHTML = `<strong>Error ${response.status}:</strong><br><pre>${responseText}</pre>`;
                     }
                 } catch (error) {
                     console.error('Error:', error);
