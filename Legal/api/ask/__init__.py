@@ -427,13 +427,13 @@ def chat(question: str, client: AzureOpenAI, config: dict) -> str:
       "action": "When two passages support the same atomic fact, keep the shorter, more precise one" },
 
     { "step": "draft_answer",
-      "action": "Write exactly two sections:  \n                 – TL;DR Summary: bullet list; every bullet begins with a bold key phrase, includes all relevant MUST‑MENTION items for that point, and ends with ≥ 1 citation.  \n                 – Detailed Explanation: flowing prose; EVERY sentence ends with ≥ 1 citation.  \n                 Do NOT add tables, extra headings, or uncited assertions." },
+      "action": "Write exactly two sections:  \n                 – TL;DR Summary: bullet list; every bullet begins with a bold key phrase, includes all relevant MUST‑MENTION items for that point.  \n                 – Detailed Explanation: flowing prose with clear, professional language.  \n                 Do NOT add tables, extra headings, or technical chunk citations." },
 
     { "step": "citation_pruner",
-      "action": "Within each citation list, drop any passage whose removal leaves the sentence fully supported; delete sentences whose lists become empty." },
+      "action": "Review content for clarity and completeness; ensure all factual claims are supported by the provided context." },
 
     { "step": "fact_source_check",
-      "action": "For EVERY factual fragment: confirm it is explicitly present (or directly inferable) in at least one cited passage.  \n                 – If a claim is *negative* (e.g. “no age restriction”, “no permit required”) you must either:  \n                   (a) cite a passage that expressly states the absence, OR  \n                   (b) write “The supplied sources do not address …” **without attaching any citation**.  \n                 – If support is lacking: delete, rewrite, or express uncertainty with qualifying language." },
+      "action": "For EVERY factual fragment: confirm it is explicitly present (or directly inferable) in at least one provided passage.  \n                 – If a claim is *negative* (e.g. "no age restriction", "no permit required") you must either:  \n                   (a) reference a passage that expressly states the absence, OR  \n                   (b) write "The supplied sources do not address …".  \n                 – If support is lacking: delete, rewrite, or express uncertainty with qualifying language." },
 
     { "step": "permit_check",
       "action": "If any kept passage mentions a permit, licence, or exemption regime, ensure TL;DR contains a bullet that names the rule, states whether the object requires it, and cites the permit passage.  Fail otherwise." },
@@ -447,8 +447,8 @@ def chat(question: str, client: AzureOpenAI, config: dict) -> str:
 
   /*―――――――― CITATION POLICY ――――――――*/
   "citation_policy": {
-    "in_corpus": "Use exactly: (KL {ISO-code} §section[, §section…])",
-    "external_quote": "Reproduce the statute’s own citation string verbatim as shown in the passage"
+    "in_corpus": "Present information in clear, professional language without technical chunk references. Only include citations that appear naturally within the source documents themselves.",
+    "external_quote": "Reproduce any citation strings that appear verbatim within the original source documents"
   },
 
   /*―――――――― OUTPUT FORMAT ――――――――*/
