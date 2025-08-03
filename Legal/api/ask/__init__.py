@@ -643,6 +643,7 @@ Be extremely precise - only flag content as "missing" if genuinely absent, not j
     #        "sources_count": len(chunks)
     #    }
         final_response = {
+            "country_header": header,
             "refined_answer": answer
         }
         
