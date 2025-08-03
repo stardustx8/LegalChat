@@ -116,7 +116,7 @@
             </details>
             <hr>
             <div id="country-header-container"></div>
-            <h2>Refined Answer</h2>
+            <h2>Answer</h2>
             <div id="refined-answer-container"></div>
         </div>
     </div>
@@ -169,7 +169,7 @@
                     if (data && data.refined_answer) {
                         refinedAnswerContainer.innerHTML = marked.parse(data.refined_answer);
                     } else {
-                        refinedAnswerContainer.textContent = 'No refined answer found in the response.';
+                        refinedAnswerContainer.textContent = 'No valid answer found in the response.';
                     }
                 } else {
                     const errorText = await response.text();

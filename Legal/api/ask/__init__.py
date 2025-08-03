@@ -322,6 +322,7 @@ Create an improved answer that:
 2. **COMPREHENSIVE RECALL** (RAG-Only): Include ALL relevant facts from provided CONTEXT, especially ensuring complete coverage of multi-jurisdictional scenarios - each jurisdiction in the provided sources must be fully represented. Never supplement with external legal knowledge.
 3. **PROFESSIONAL PRESENTATION**: Present information clearly without technical chunk references
 4. **NEGATIVE CLAIMS** (RAG-Only): Only state "no X exists" if explicitly stated in the provided CONTEXT sources. If a topic is not addressed in the provided documents, state "The supplied sources do not address..."
+5. **PENALTY INCLUSION** (RAG-Only): If ANY penalty, fine, criminal charge, or legal consequence is mentioned in the provided CONTEXT, it MUST be included in the refined answer. Legal consequences are always material to user decision-making.
 
 ## OUTPUT FORMAT
 
@@ -423,6 +424,9 @@ def chat(question: str, client: AzureOpenAI, config: dict) -> str:
 
     { "step": "salience_upgrade",
       "action": "From the kept passages extract every element that conditions legality:  \n                 • numeric thresholds (length, amount, age, time, penalty, etc.)  \n                 • categorical qualifiers (e.g. “automatic”, “concealed”, “professional use”)  \n                 • explicit exceptions / carve‑outs / special categories (e.g. butterfly knives, antique items)  \n                 • permit / licence or exemption regimes  \n                 • enforcement or penalty provisions  \n                 • age or capacity prerequisites explicitly stated in the text  \n                 • lawful‑tool / dangerous‑object clauses  \n                 Mark **each** item as MUST‑MENTION verbatim (units included)." },
+
+    { "step": "penalty_completeness_check",
+      "action": "MANDATORY: Review all provided passages for ANY mention of penalties, fines, criminal charges, misdemeanour, imprisonment, confiscation, or legal consequences. If ANY penalty information exists in the context, it MUST be included in the answer. Legal users need to understand potential consequences of their actions." },
 
     { "step": "deduplicate",
       "action": "When two passages support the same atomic fact, keep the shorter, more precise one" },
