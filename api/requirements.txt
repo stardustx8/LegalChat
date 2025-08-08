@@ -1,5 +1,0 @@
-azure-functions
-azure-functions-durable
-openai>=1.13.3
-requests
-python-dotenv
