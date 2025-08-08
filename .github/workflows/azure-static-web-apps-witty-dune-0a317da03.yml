@@ -30,6 +30,7 @@ jobs:
           app_location: "Legal" # App source code path
           api_location: "Legal/api" # Api source code path - optional
           skip_app_build: "true"
+          skip_api_build: "true"
           ###### End of Repository/Build Configurations ######
 
       - name: Warmup Function (optional)
