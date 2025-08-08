@@ -682,6 +682,11 @@ def main(req: func.HttpRequest) -> func.HttpResponse:
 
     # 2. Process the request and run the RAG pipeline
     try:
+        # Lightweight health check / warmup endpoint to avoid cold start latency
+        # Example: GET /api/ask?ping=1 returns immediately with "pong"
+        if req.params.get('ping'):
+            return func.HttpResponse("pong", status_code=200, mimetype="text/plain")
+
         question = req.params.get('question')
         if not question:
             try:

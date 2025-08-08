@@ -3,7 +3,9 @@ import os, json, requests, re
 from azure.core.credentials import AzureKeyCredential
 # from azure.search.documents import SearchClient # Bypassing buggy client
 from openai import AzureOpenAI  # pip install azure-search-documents openai>=1.13
+from dotenv import load_dotenv
 
+load_dotenv()
 SEARCH_ENDPOINT   = os.environ["KNIFE_SEARCH_ENDPOINT"]
 SEARCH_KEY        = os.environ["KNIFE_SEARCH_KEY"]       # admin *or* query key ok for reads
 INDEX_NAME        = os.environ.get("KNIFE_SEARCH_INDEX", "knife-index")
@@ -125,12 +127,12 @@ def retrieve(query: str, iso_codes: list[str], k: int = 5) -> list[dict]:
             {
                 "kind": "vector",
                 "vector": vec,
-                "fields": "vector",
+                "fields": "embedding",
                 "k": k
             }
         ],
         "filter": filter_str,
-        "select": "content,iso_code,chunk_index"
+        "select": "chunk,iso_code,id"
     }
     response = requests.post(search_url, headers=headers, json=payload)
     response.raise_for_status()

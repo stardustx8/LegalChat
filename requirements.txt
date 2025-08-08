@@ -1,0 +1,4 @@
+openai>=1.13.3
+requests
+python-dotenv
+azure-core
