@@ -34,16 +34,46 @@ jobs:
           ls -la Legal || true
           echo "Legal/api dir:"
           ls -la Legal/api || true
+      - name: Debug token SHA256 (masked)
+        env:
+          TOKEN: ${{ secrets.AZURE_STATIC_WEB_APPS_API_TOKEN_WITTY_DUNE_0A317DA03 }}
+        run: |
+          if command -v sha256sum >/dev/null 2>&1; then
+            printf "%s" "$TOKEN" | sha256sum | awk '{print "TOKEN_SHA256=" $1}'
+          else
+            printf "%s" "$TOKEN" | shasum -a 256 | awk '{print "TOKEN_SHA256=" $1}'
+          fi
+      - name: Prepare trimmed token
+        env:
+          TOKEN: ${{ secrets.AZURE_STATIC_WEB_APPS_API_TOKEN_WITTY_DUNE_0A317DA03 }}
+        run: |
+          # Remove any trailing newlines or CR characters from the token
+          printf "%s" "$TOKEN" | tr -d '\n' | tr -d '\r' > token.txt
+          echo "SWA_TOKEN_TRIMMED=$(cat token.txt)" >> "$GITHUB_ENV"
+          echo "TRIMMED_TOKEN_LEN=$(wc -c < token.txt)"
+      - name: Install OIDC Client from Core Package
+        run: npm install @actions/core@1.6.0 @actions/http-client
+      - name: Get Id Token
+        uses: actions/github-script@v6
+        id: idtoken
+        with:
+          script: |
+            const core = require('@actions/core');
+            return await core.getIDToken();
+          result-encoding: string
       - name: Build And Deploy
         id: builddeploy
         uses: Azure/static-web-apps-deploy@v1
         with:
-          azure_static_web_apps_api_token: ${{ secrets.AZURE_STATIC_WEB_APPS_API_TOKEN_WITTY_DUNE_0A317DA03 }}
+          azure_static_web_apps_api_token: ${{ env.SWA_TOKEN_TRIMMED }}
           action: "upload"
           ###### Repository/Build Configurations - These values can be configured to match your app requirements. ######
           # For more information regarding Static Web App workflow configurations, please visit: https://aka.ms/swaworkflowconfig
           app_location: "Legal" # App source code path
           api_location: "Legal/api" # Api source code path - optional
+          production_branch: "main"
+          repo_token: ${{ secrets.GITHUB_TOKEN }}
+          github_id_token: ${{ steps.idtoken.outputs.result }}
           ###### End of Repository/Build Configurations ######
 
   close_pull_request_job:
