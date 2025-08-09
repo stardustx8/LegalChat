@@ -1,18 +1,10 @@
-# ask.py
+import logging
 import os, json, requests, re
-from azure.core.credentials import AzureKeyCredential
-# from azure.search.documents import SearchClient # Bypassing buggy client
-from openai import AzureOpenAI  # pip install azure-search-documents openai>=1.13
+import azure.functions as func
+from openai import AzureOpenAI
 
-SEARCH_ENDPOINT   = os.environ["KNIFE_SEARCH_ENDPOINT"]
-SEARCH_KEY        = os.environ["KNIFE_SEARCH_KEY"]       # admin *or* query key ok for reads
-INDEX_NAME        = os.environ.get("KNIFE_SEARCH_INDEX", "knife-index")
-
-OPENAI_ENDPOINT   = os.environ["KNIFE_OPENAI_ENDPOINT"]
-OPENAI_KEY        = os.environ["KNIFE_OPENAI_KEY"]
-DEPLOY_CHAT       = os.environ.get("OPENAI_CHAT_DEPLOY", "gpt-4.1") # gpt-4.1
-DEPLOY_EMBED      = os.environ.get("OPENAI_EMBED_DEPLOY", "text-embedding-3-large")
-API_VERSION       = os.environ.get("OPENAI_API_VERSION", "2024-02-15-preview")
+# --- Prompts and Helper Functions ---
+# Note: Environment variables are loaded within the main() function to prevent module-level errors.
 
 COUNTRY_DETECTION_PROMPT = """
 ROLE
@@ -65,23 +57,18 @@ FORMATTING RULES
 •  If nothing is found, return `[]`.
 """
 
-def embed(text:str)->list[float]:
-    cli = AzureOpenAI(
-        azure_endpoint = OPENAI_ENDPOINT,
-        api_key        = OPENAI_KEY,
-        api_version    = API_VERSION,
-    )
-    emb = cli.embeddings.create(
+def embed(text: str, client: AzureOpenAI, deploy_embed: str) -> list[float]:
+    """Generates embeddings for a given text using a specific deployment."""
+    return client.embeddings.create(
         input=[text],
-        model=DEPLOY_EMBED
+        model=deploy_embed
     ).data[0].embedding
-    return emb
 
-def extract_iso_codes(text:str, client:AzureOpenAI)->list[str]:
+def extract_iso_codes(text: str, client: AzureOpenAI, deploy_chat: str) -> list[str]:
     """Extracts ISO-3166-1 alpha-2 country codes from text using an LLM call."""
     try:
         response = client.chat.completions.create(
-            model=DEPLOY_CHAT,
+            model=deploy_chat,
             messages=[
                 {"role": "system", "content": COUNTRY_DETECTION_PROMPT},
                 {"role": "user", "content": text}
@@ -89,15 +76,11 @@ def extract_iso_codes(text:str, client:AzureOpenAI)->list[str]:
             temperature=0.0,
         )
         raw_content = response.choices[0].message.content.strip()
-        
-        # Clean up response from markdown code block
         cleaned_content = re.sub(r'^```json\s*|\s*```$', '', raw_content)
-        
         data = json.loads(cleaned_content)
         if not isinstance(data, list):
             return []
 
-        # Validate and deduplicate by code
         used_codes = set()
         results = []
         for item in data:
@@ -109,17 +92,20 @@ def extract_iso_codes(text:str, client:AzureOpenAI)->list[str]:
         return results
 
     except (json.JSONDecodeError, IndexError, AttributeError) as e:
-        print(f"Error parsing country detection response: {e}")
-        return [] # Return empty on parsing or response error
+        logging.error(f"Error parsing country detection response: {e}")
+        return []
 
-def retrieve(query: str, iso_codes: list[str], k: int = 5) -> list[dict]:
+def retrieve(query: str, iso_codes: list[str], client: AzureOpenAI, config: dict, k: int = 5) -> list[dict]:
+    """Retrieves documents from Azure Cognitive Search based on a vector query and filters."""
     if not iso_codes:
         return []
-    vec = embed(query)
-    search_url = f"{SEARCH_ENDPOINT}/indexes/{INDEX_NAME}/docs/search?api-version=2023-11-01"
-    headers = {'Content-Type': 'application/json', 'api-key': SEARCH_KEY}
+    
+    vec = embed(query, client, config['deploy_embed'])
+    
+    search_url = f"{config['search_endpoint']}/indexes/{config['index_name']}/docs/search?api-version=2023-11-01"
+    headers = {'Content-Type': 'application/json', 'api-key': config['search_key']}
     filter_str = f"search.in(iso_code, '{','.join(iso_codes)}', ',')"
-    # New vectorQueries format for API version 2023-11-01:
+    
     payload = {
         "vectorQueries": [
             {
@@ -132,27 +118,90 @@ def retrieve(query: str, iso_codes: list[str], k: int = 5) -> list[dict]:
         "filter": filter_str,
         "select": "content,iso_code,chunk_index"
     }
+    
     response = requests.post(search_url, headers=headers, json=payload)
     response.raise_for_status()
     return response.json().get('value', [])
 
-def chat(question:str, client:AzureOpenAI)->dict:
+def iso_to_flag(iso_code: str) -> str:
+    """Converts a two-letter ISO country code to a flag emoji."""
+    if not isinstance(iso_code, str) or len(iso_code) != 2:
+        return ""
+    return "".join(chr(ord(char.upper()) - ord('A') + 0x1F1E6) for char in iso_code)
+
+def build_response_header(iso_codes: list[str], found_iso_codes: set[str]) -> str:
+    """Builds a Markdown table header to display detected countries and their availability."""
+    if not iso_codes:
+        return ""
+
+    # Main header for the section
+    main_header = "# Country Detection"
+
+    # Create the table header and separator rows
+    table_header_line = "| Detected in Query | Document Available |"
+    table_separator_line = "|:-----------------:|:------------------:|"
+    
+    # Create the data rows for each country
+    data_lines = []
+    for code in sorted(iso_codes):
+        flag = iso_to_flag(code)
+        availability_icon = "✅" if code in found_iso_codes else "❌"
+        # Combine flag and code in the first column for clarity
+        data_lines.append(f"| {flag} ({code}) | {availability_icon} |")
+
+    # Combine all parts into a single Markdown table string
+    table = "\n".join([table_header_line, table_separator_line] + data_lines)
+    
+    # Combine the main header and the table
+    return f"{main_header}\n\n{table}\n\n---\n\n"
+
+GRADER_REFINER_PROMPT = """
+{
+  "role": "grader_and_refiner_agent",
+  "private_thought_key": "internal_grading_and_refinement_process",
+
+  "goal": "First, critically evaluate a DRAFT_ANSWER against the provided CONTEXT. Second, produce a REFINED_ANSWER that corrects all identified flaws and perfectly adheres to the output format. The final output will contain both the evaluation and the refined answer for debugging.",
+
+  "workflow": [
+    { "step": "extract_salient_facts",
+      "action": "From the CONTEXT passages, compile a comprehensive list of every atomic factual element (statutory conditions, exceptions, numeric thresholds, penalties, etc.) that is directly relevant to the user's QUESTION. This list will serve as the ground truth for grading." },
+
+    { "step": "grade_draft",
+      "action": "Evaluate the DRAFT_ANSWER against the salient_facts list. Calculate and record the following:\n                 - missing_facts: [An array of salient facts that were NOT included in the draft].\n                 - unsupported_claims: [An array of claims from the draft that are NOT supported by the CONTEXT].\n                 - scores: {\n                     'recall': '(# salient facts present) / (total salient facts)',\n                     'precision': '(# supported claims) / (total claims)',\n                     'F1': 'Harmonic mean of recall and precision'\n                   }" },
+
+    { "step": "refine_answer",
+      "action": "Rewrite the DRAFT_ANSWER into a REFINED_ANSWER to achieve recall=1.0 and precision≈1.0.\n                 - Integrate all 'missing_facts' with correct citations.\n                 - Remove or rewrite all 'unsupported_claims' to be strictly grounded in the CONTEXT.\n                 - Adhere perfectly to the answer format: two sections ('TL;DR Summary', 'Detailed Explanation'), with every sentence cited." },
+
+    { "step": "finalize_output",
+      "action": "Produce a single JSON object with two keys: 'evaluation' and 'refined_answer'.\n                 - The 'evaluation' key will contain the full output of the 'grade_draft' step.\n                 - The 'refined_answer' key will contain ONLY the final, user-facing text of the refined answer." }
+  ],
+
+  "house_rules": {
+    "negative_claims": "A negative assertion (e.g., 'no age limit') must be supported by an explicit passage stating the absence. Otherwise, phrase it as 'The supplied sources do not address...' and give it NO citation.",
+    "citation_format": "(KL {ISO-code} §section)"
+  }
+}
+"""
+
+def chat(question: str, client: AzureOpenAI, config: dict) -> str:
     """Orchestrates the RAG pipeline to answer a question."""
-    iso_codes = extract_iso_codes(question, client)
+    iso_codes = extract_iso_codes(question, client, config['deploy_chat'])
     if not iso_codes:
         return "Could not determine a country from your query. Please be more specific."
 
-    print(f"Detected countries: {', '.join(iso_codes)}")
-    chunks = retrieve(question, iso_codes, k=5)
+    logging.info(f"Detected countries: {', '.join(iso_codes)}")
+    chunks = retrieve(question, iso_codes, client, config, k=5)
 
     if not chunks:
-        return f"No documents found for the specified countries: {', '.join(iso_codes)}. Please try another query or check if the relevant legislation is available."
+        # Even if no docs are found, we can still show the header with availability status
+        found_iso_codes = set()
+        header = build_response_header(iso_codes, found_iso_codes)
+        no_docs_message = f"No documents found for the specified countries: {', '.join(iso_codes)}. Please try another query or check if the relevant legislation is available."
+        return header + no_docs_message
 
-    # Assemble the prompt for the drafter model
     drafter_system_message = """
 {
   "role": "expert_legal_research_assistant",
-  "output_mandate": "You are the sole and final agent. Your output is the direct, user-facing answer and will not be reviewed or modified by any other process. Produce the highest possible quality answer, as it will be judged on its standalone merits.",
   "private_thought_key": "internal_chain_of_thought",
 
   /*―――――――――― WORKFLOW ――――――――――*/
@@ -245,52 +294,33 @@ def chat(question:str, client:AzureOpenAI)->dict:
 }
     """
     context = "\n\n---\n\n".join([c['content'] for c in chunks])
+    
     # --- Step 1: Draft Answer ---
-    print("\n--- Generating draft answer... ---")
+    logging.info("Generating draft answer...")
     draft_resp = client.chat.completions.create(
-        model=DEPLOY_CHAT,
+        model=config['deploy_chat'],
         messages=[
             {"role": "system", "content": drafter_system_message},
             {"role": "user", "content": f"Context:\n{context}\n\nQuestion: {question}"}
         ],
-        temperature=0.0,
+        temperature=0.0, # Keep draft deterministic
     )
     draft_answer = draft_resp.choices[0].message.content.strip()
-    print("--- Draft answer generated. ---")
+    logging.info("Draft answer generated.")
+
+    # Build the dynamic markdown table header
+    found_iso_codes = {chunk['iso_code'] for chunk in chunks}
+    header = build_response_header(iso_codes, found_iso_codes)
+    
+    # Prepend header to the draft answer before sending to refiner
+    draft_with_header = header + draft_answer
 
     # --- Step 2: Grade and Refine Answer ---
-    print("--- Grading and refining answer... ---")
-    GRADER_REFINER_PROMPT = """
-{
-  "role": "grader_and_refiner_agent",
-  "private_thought_key": "internal_grading_and_refinement_process",
-
-  "goal": "First, critically evaluate a DRAFT_ANSWER against the provided CONTEXT. Second, produce a REFINED_ANSWER that corrects all identified flaws and perfectly adheres to the output format. The final output will contain both the evaluation and the refined answer for debugging.",
-
-  "workflow": [
-    { "step": "extract_salient_facts",
-      "action": "From the CONTEXT passages, compile a comprehensive list of every atomic factual element (statutory conditions, exceptions, numeric thresholds, penalties, etc.) that is directly relevant to the user's QUESTION. This list will serve as the ground truth for grading." },
-
-    { "step": "grade_draft",
-      "action": "Evaluate the DRAFT_ANSWER against the salient_facts list. Calculate and record the following:\n                 - missing_facts: [An array of salient facts that were NOT included in the draft].\n                 - unsupported_claims: [An array of claims from the draft that are NOT supported by the CONTEXT].\n                 - scores: {\n                     'recall': '(# salient facts present) / (total salient facts)',\n                     'precision': '(# supported claims) / (total claims)',\n                     'F1': 'Harmonic mean of recall and precision'\n                   }" },
-
-    { "step": "refine_answer",
-      "action": "Rewrite the DRAFT_ANSWER into a REFINED_ANSWER to achieve recall=1.0 and precision≈1.0.\n                 - Integrate all 'missing_facts' with correct citations.\n                 - Remove or rewrite all 'unsupported_claims' to be strictly grounded in the CONTEXT.\n                 - Adhere perfectly to the answer format: two sections ('TL;DR Summary', 'Detailed Explanation'), with every sentence cited." },
-
-    { "step": "finalize_output",
-      "action": "Produce a single JSON object with two keys: 'evaluation' and 'refined_answer'.\n                 - The 'evaluation' key will contain the full output of the 'grade_draft' step.\n                 - The 'refined_answer' key will contain ONLY the final, user-facing text of the refined answer." }
-  ],
-
-  "house_rules": {
-    "negative_claims": "A negative assertion (e.g., 'no age limit') must be supported by an explicit passage stating the absence. Otherwise, phrase it as 'The supplied sources do not address...' and give it NO citation.",
-    "citation_format": "(KL {ISO-code} §section)"
-  }
-}
-"""
-    refiner_user_message = f"""CONTEXT:\n{context}\n\nQUESTION: {question}\n\nDRAFT_ANSWER:\n{draft_answer}"""
+    logging.info("Grading and refining answer...")
+    refiner_user_message = f"""CONTEXT:\n{context}\n\nQUESTION: {question}\n\nDRAFT_ANSWER:\n{draft_with_header}"""
 
     refine_resp = client.chat.completions.create(
-        model=DEPLOY_CHAT,
+        model=config['deploy_chat'], # Use the best model for this complex task
         response_format={"type": "json_object"},
         messages=[
             {"role": "system", "content": GRADER_REFINER_PROMPT},
@@ -300,35 +330,89 @@ def chat(question:str, client:AzureOpenAI)->dict:
     )
     
     refined_output_json = refine_resp.choices[0].message.content.strip()
-    print("--- Refined answer generated. ---")
+    logging.info("Refined answer generated.")
 
+    # For debugging, we return the full JSON. In production, you might extract just the 'refined_answer'.
+    # We add the header to the final refined answer text before packaging it up.
     try:
         refined_data = json.loads(refined_output_json)
+        answer = refined_data.get('refined_answer', '')
     except json.JSONDecodeError:
-        print("ERROR: Failed to decode JSON from refiner model. Falling back to draft.")
+        logging.error("Failed to decode JSON from refiner model.")
+        # Fallback to the draft answer if the refiner fails
         refined_data = {
             "evaluation": {"error": "Refiner output was not valid JSON.", "raw_output": refined_output_json},
-            "refined_answer": draft_answer
+            "refined_answer": draft_answer 
         }
+        answer = draft_answer
 
-    return refined_data
+    # For debugging, return the entire object as a JSON string.
+    # The 'answer' variable already contains the 'refined_answer' text.
+    refined_data['refined_answer'] = answer
+    refined_data['country_header'] = header  # Add the header to the response object
+    return json.dumps(refined_data, indent=2)
 
-def main():
-    """Main execution function."""
-    # Centralise the OpenAI client
-    client = AzureOpenAI(
-        azure_endpoint=OPENAI_ENDPOINT,
-        api_key=OPENAI_KEY,
-        api_version=API_VERSION,
-    )
+# --- Azure Function Main Entry Point ---
+def main(req: func.HttpRequest) -> func.HttpResponse:
+    logging.info('API function invoked.')
+
+    # 1. Load and validate all required environment variables
     try:
-        while True:
-            q = input("Ask (or 'exit'): ")
-            if q.lower() == 'exit':
-                break
-            print(chat(q, client))
-    except KeyboardInterrupt:
-        print("\nExiting.")
+        required_vars = {
+            "search_endpoint": "KNIFE_SEARCH_ENDPOINT",
+            "search_key": "KNIFE_SEARCH_KEY",
+            "openai_endpoint": "KNIFE_OPENAI_ENDPOINT",
+            "openai_key": "KNIFE_OPENAI_KEY"
+        }
+        config = {key: os.environ[val] for key, val in required_vars.items()}
 
-if __name__ == "__main__":
-    main()
+        # Add optional vars with defaults
+        config.update({
+            "index_name": os.environ.get("KNIFE_SEARCH_INDEX", "knife-index"),
+            "deploy_chat": os.environ.get("OPENAI_CHAT_DEPLOY", "gpt-4.1"),
+            "deploy_embed": os.environ.get("OPENAI_EMBED_DEPLOY", "text-embedding-3-large"),
+            "api_version": os.environ.get("OPENAI_API_VERSION", "2024-02-15-preview")
+        })
+    except KeyError as e:
+        error_msg = f"Configuration error: Missing required environment variable: {e}"
+        logging.error(error_msg)
+        return func.HttpResponse(error_msg, status_code=500)
+
+    # 2. Process the request and run the RAG pipeline
+    try:
+        question = req.params.get('question')
+        if not question:
+            try:
+                req_body = req.get_json()
+            except ValueError:
+                pass
+            else:
+                question = req_body.get('question')
+
+        if not question:
+            return func.HttpResponse(
+                "Please pass a question on the query string or in the request body, e.g., /api/ask?question=...",
+                status_code=400
+            )
+
+        # Initialize the Azure OpenAI client
+        client = AzureOpenAI(
+            azure_endpoint=config['openai_endpoint'],
+            api_key=config['openai_key'],
+            api_version=config['api_version'],
+        )
+
+        # Execute the RAG pipeline
+        answer = chat(question, client, config)
+
+        # Return the response
+        # The 'chat' function now returns a JSON string, so we set the mimetype accordingly
+        return func.HttpResponse(answer, mimetype="application/json", status_code=200)
+
+    except Exception as e:
+        # Log the full exception traceback for detailed diagnostics
+        logging.error(f"An unexpected error occurred: {e}", exc_info=True)
+        return func.HttpResponse(
+            f"An internal server error occurred. Please check the logs for details. Error ID: {getattr(e, 'error_id', 'N/A')}", 
+            status_code=500
+        )

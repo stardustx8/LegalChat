@@ -1060,15 +1060,6 @@
         // Initialize when DOM is ready
         document.addEventListener('DOMContentLoaded', function() {
             console.log('DEBUG: DOMContentLoaded event fired');
-            // Warmup the backend to mitigate cold start latency on first call
-            (async () => {
-                try {
-                    await fetch('/api/ask?ping=1', { method: 'GET', cache: 'no-store' });
-                    console.log('DEBUG: Warmup ping completed');
-                } catch (e) {
-                    console.warn('DEBUG: Warmup ping failed', e);
-                }
-            })();
             const askButton = document.getElementById('askButton');
             const questionInput = document.getElementById('question');
             const responseArea = document.getElementById('response-area');
@@ -1092,8 +1083,7 @@
             refinedAnswerContainer.innerHTML = '';
 
             try {
-                // Attempt 1
-                let response = await fetch('/api/ask', {
+                const response = await fetch('/api/ask', {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json'
@@ -1101,21 +1091,9 @@
                     body: JSON.stringify({ question })
                 });
 
-                // Retry once after a warmup ping if the first attempt was not OK
-                if (!response.ok) {
-                    console.warn('DEBUG: First /api/ask call not OK, sending warmup ping and retrying once');
-                    try { await fetch('/api/ask?ping=1', { method: 'GET', cache: 'no-store' }); } catch (e) { console.warn('DEBUG: Warmup ping during retry failed', e); }
-                    response = await fetch('/api/ask', {
-                        method: 'POST',
-                        headers: {
-                            'Content-Type': 'application/json'
-                        },
-                        body: JSON.stringify({ question })
-                    });
-                }
-
                 if (response.ok) {
                     const data = await response.json(); // Parse the JSON response
+                    
                     console.log('DEBUG: API result:', data);
 
                     // Display the full raw JSON for debugging

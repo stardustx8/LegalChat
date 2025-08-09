@@ -658,11 +658,6 @@ Be extremely precise - only flag content as "missing" if genuinely absent, not j
 def main(req: func.HttpRequest) -> func.HttpResponse:
     logging.info('API function invoked.')
 
-    # Lightweight health check / warmup endpoint to avoid cold start latency
-    # Example: GET /api/ask?ping=1 returns immediately with "pong"
-    if req.params.get('ping'):
-        return func.HttpResponse("pong", status_code=200, mimetype="text/plain")
-
     # 1. Load and validate all required environment variables
     try:
         required_vars = {
@@ -687,7 +682,6 @@ def main(req: func.HttpRequest) -> func.HttpResponse:
 
     # 2. Process the request and run the RAG pipeline
     try:
-        # Warmup handled earlier; proceed to parse question
         question = req.params.get('question')
         if not question:
             try:
