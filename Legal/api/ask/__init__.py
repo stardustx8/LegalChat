@@ -298,6 +298,13 @@ def build_response_header(iso_codes: list[str], found_iso_codes: set[str]) -> st
     # Combine the main header and the table
     return f"{main_header}\n\n{table}\n\n---\n\n"
 
+DRAFTER_SYSTEM_MESSAGE = (
+    "You are a legal assistant. Using only the provided CONTEXT, produce a clear,"
+    " jurisdiction-aware answer for the QUESTION with two sections: '## Summary' and"
+    " '## Details'. Be concise and precise. Use only information present in the CONTEXT."
+    " Do not include technical chunk identifiers."
+)
+
 GRADER_REFINER_PROMPT = """
 You are a specialized legal document evaluator and refiner. Your task is to systematically evaluate a draft answer against source documents and produce an improved version.
 
@@ -474,19 +481,40 @@ def chat(question: str, client: AzureOpenAI, config: dict) -> str:
         header = build_response_header(iso_codes, found_iso_codes)
         logging.info("DEBUG: Header built for UI")
 
-        # --- Step 2: Grade and Refine Answer ---
-        logging.info("DEBUG: Step 4 - Calling OpenAI for single-pass refine/answer...")
-        refiner_user_message = f"""
-QUESTION:
-{question}
+        # Step 4: Generate a draft answer first (align with grader/refiner expectations)
+        logging.info("DEBUG: Step 4 - Generating draft answer...")
+        try:
+            t_draft_start = time.monotonic()
+            draft_resp = with_retries(
+                lambda: client.chat.completions.create(
+                    model=config['deploy_chat'],
+                    messages=[
+                        {"role": "system", "content": DRAFTER_SYSTEM_MESSAGE},
+                        {"role": "user", "content": f"QUESTION:\n{question}\n\nCONTEXT:\n{context}"}
+                    ],
+                    temperature=0.0,
+                ),
+                attempts=2,
+                initial_delay=0.4
+            )
+            draft_answer = draft_resp.choices[0].message.content.strip()
+            llm_draft_ms = int((time.monotonic() - t_draft_start) * 1000)
+            logging.info("DEBUG: Draft answer generated successfully")
+            logging.info(f"TIMING: llm_draft_ms={llm_draft_ms}")
+        except Exception as draft_error:
+            logging.error(f"DEBUG: Draft step failed: {draft_error}")
+            raise
 
-CONTEXT:
-{context}
-
-INSTRUCTIONS: Answer using only the CONTEXT; be concise and precise.
-"""
+        # Step 5: Grade and refine the draft using the full grader prompt
+        logging.info("DEBUG: Step 5 - Grading and refining draft...")
+        refiner_user_message = (
+            f"CONTEXT:\n{context}\n\n"
+            f"QUESTION:\n{question}\n\n"
+            f"DRAFT_ANSWER:\n{draft_answer}\n\n"
+            f"Return the exact JSON structure specified in the system message."
+        )
         logging.info(f"DEBUG: Systematic evaluation message length: {len(refiner_user_message)} characters")
-        
+
         # Conservative token limit for systematic evaluation with structured context
         if len(refiner_user_message) > 40000:
             logging.warning("DEBUG: Message too long for systematic evaluation, truncating context")
@@ -494,12 +522,20 @@ INSTRUCTIONS: Answer using only the CONTEXT; be concise and precise.
             context_lines = context.split('\n')
             truncated_lines = context_lines[:int(len(context_lines) * 0.7)]  # Keep 70% of context
             context = '\n'.join(truncated_lines) + "\n\n[Context truncated for systematic evaluation]"
+            # Rebuild message after truncation
+            refiner_user_message = (
+                f"CONTEXT:\n{context}\n\n"
+                f"QUESTION:\n{question}\n\n"
+                f"DRAFT_ANSWER:\n{draft_answer}\n\n"
+                f"Return the exact JSON structure specified in the system message."
+            )
 
         try:
             t_llm_start = time.monotonic()
             refine_resp = with_retries(
                 lambda: client.chat.completions.create(
                     model=config['deploy_chat'],
+                    response_format={"type": "json_object"},
                     messages=[
                         {"role": "system", "content": GRADER_REFINER_PROMPT},
                         {"role": "user", "content": refiner_user_message}
