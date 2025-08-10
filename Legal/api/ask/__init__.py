@@ -204,8 +204,11 @@ def retrieve(query: str, iso_codes: list[str], client: AzureOpenAI, config: dict
     
     try:
         logging.info("DEBUG: Generating embedding for query...")
+        t_embed_start = time.monotonic()
         vec = with_retries(lambda: embed(query, client, config['deploy_embed']), attempts=2, initial_delay=0.4)
+        embed_ms = int((time.monotonic() - t_embed_start) * 1000)
         logging.info(f"DEBUG: Embedding generated successfully, length={len(vec)}")
+        logging.info(f"TIMING: embed_ms={embed_ms}")
     except Exception as e:
         logging.error(f"DEBUG: Failed to generate embedding: {e}")
         raise
@@ -237,10 +240,13 @@ def retrieve(query: str, iso_codes: list[str], client: AzureOpenAI, config: dict
     
     session = get_session()
     try:
+        t_search_start = time.monotonic()
         response = with_retries(lambda: _post_and_raise(session, search_url, headers, payload), attempts=2, initial_delay=0.4)
         logging.info(f"DEBUG: Search response status: {response.status_code}")
         response.raise_for_status()
         raw_results = response.json().get('value', [])
+        search_ms = int((time.monotonic() - t_search_start) * 1000)
+        logging.info(f"TIMING: search_ms={search_ms}")
         logging.info(f"DEBUG: Raw search returned {len(raw_results)} documents")
         
         # For multi-country queries, ensure balanced representation
@@ -406,10 +412,14 @@ Provide a JSON response with this exact structure:
 def chat(question: str, client: AzureOpenAI, config: dict) -> str:
     """Orchestrates the RAG pipeline to answer a question."""
     logging.info("DEBUG: Starting chat function")
+    t_total_start = time.monotonic()
     
     try:
         logging.info("DEBUG: Step 1 - Extracting ISO codes")
+        t_iso_start = time.monotonic()
         iso_codes = extract_iso_codes(question, client, config['deploy_chat'])
+        iso_ms = int((time.monotonic() - t_iso_start) * 1000)
+        logging.info(f"TIMING: iso_detection_ms={iso_ms}")
         logging.info(f"DEBUG: ISO codes extracted: {iso_codes}")
         
         if not iso_codes:
@@ -431,7 +441,10 @@ def chat(question: str, client: AzureOpenAI, config: dict) -> str:
         
         logging.info(f"DEBUG: Using dynamic k={retrieval_k} for {len(iso_codes)} countries: {iso_codes}")
         logging.info(f"DEBUG: Multi-jurisdictional query detected: {len(iso_codes) > 1}")
+        t_retrieve_start = time.monotonic()
         chunks = retrieve(question, iso_codes, client, config, k=retrieval_k)
+        retrieve_ms = int((time.monotonic() - t_retrieve_start) * 1000)
+        logging.info(f"TIMING: retrieve_total_ms={retrieve_ms}")
         logging.info(f"DEBUG: Retrieved {len(chunks)} chunks")
 
         if not chunks:
@@ -484,6 +497,7 @@ Using the methodology, produce the best final answer directly. No draft is provi
             context = '\n'.join(truncated_lines) + "\n\n[Context truncated for systematic evaluation]"
 
         try:
+            t_llm_start = time.monotonic()
             refine_resp = with_retries(
                 lambda: client.chat.completions.create(
                     model=config['deploy_chat'],
@@ -499,6 +513,8 @@ Using the methodology, produce the best final answer directly. No draft is provi
             )
             refined_output_json = refine_resp.choices[0].message.content.strip()
             logging.info("DEBUG: Refined answer generated successfully")
+            llm_ms = int((time.monotonic() - t_llm_start) * 1000)
+            logging.info(f"TIMING: llm_refine_ms={llm_ms}")
         except Exception as refine_error:
             logging.error(f"DEBUG: Refine step failed: {refine_error}")
             raise
@@ -550,6 +566,8 @@ Using the methodology, produce the best final answer directly. No draft is provi
             "refined_answer": answer
         }
         
+        total_ms = int((time.monotonic() - t_total_start) * 1000)
+        logging.info(f"TIMING: total_pipeline_ms={total_ms}")
         logging.info("DEBUG: Systematic evaluation pipeline completed")
         return json.dumps(final_response, indent=2)
         
