@@ -1,10 +1,24 @@
 import logging
-import os, json, requests, re
+import os, json, requests, re, time
 import azure.functions as func
 from openai import AzureOpenAI
 
 # --- Prompts and Helper Functions ---
 # Note: Environment variables are loaded within the main() function to prevent module-level errors.
+
+def with_retries(fn, attempts=1, initial_delay=0.4, factor=2.0):
+    """Retry helper: runs fn() with a small exponential backoff."""
+    delay = initial_delay
+    last_exc = None
+    for i in range(attempts + 1):
+        try:
+            return fn()
+        except Exception as e:
+            last_exc = e
+            if i == attempts:
+                raise
+            time.sleep(delay)
+            delay *= factor
 
 COUNTRY_DETECTION_PROMPT = """
 ROLE
@@ -12,7 +26,6 @@ You are a specialized assistant whose sole task is to extract country references
 
 SCOPE OF EXTRACTION
 Return **every** genuine country reference that can be inferred, using the rules below:
-
 1.  ISO 3166-1 ALPHA-2 CODES
     •  Detect any two-letter, UPPER-CASE sequence in the input text that is a valid ISO 3166-1 alpha-2 country code (e.g., CH, US, CN, DE).
     •  Crucially, ignore common short words (typically 2-3 letters), especially if lowercase, that might incidentally resemble country codes OR that you might mistakenly associate with a country. This includes articles, prepositions, pronouns, and other grammatical particles in any language (e.g., English "in", "on", "it", "is", "at", "to", "do", "am", "pm", "id", "tv", "an", "of", "or"; German "ich", "er", "sie", "es", "der", "die", "das", "ein", "mit", "auf", "in", "zu", "so", "ob"). Such words should ONLY be considered if they are unambiguously used as a direct country reference AND appear in uppercase as a specific ISO code.
@@ -121,13 +134,17 @@ def balance_country_representation(results: list[dict], iso_codes: list[str], ta
 def extract_iso_codes(text: str, client: AzureOpenAI, deploy_chat: str) -> list[str]:
     """Extracts ISO-3166-1 alpha-2 country codes from text using an LLM call."""
     try:
-        response = client.chat.completions.create(
-            model=deploy_chat,
-            messages=[
-                {"role": "system", "content": COUNTRY_DETECTION_PROMPT},
-                {"role": "user", "content": text}
-            ],
-            temperature=0.0,
+        response = with_retries(
+            lambda: client.chat.completions.create(
+                model=deploy_chat,
+                messages=[
+                    {"role": "system", "content": COUNTRY_DETECTION_PROMPT},
+                    {"role": "user", "content": text}
+                ],
+                temperature=0.0,
+            ),
+            attempts=1,
+            initial_delay=0.4
         )
         raw_content = response.choices[0].message.content.strip()
         cleaned_content = re.sub(r'^```json\s*|\s*```$', '', raw_content)
@@ -163,7 +180,7 @@ def retrieve(query: str, iso_codes: list[str], client: AzureOpenAI, config: dict
     
     try:
         logging.info("DEBUG: Generating embedding for query...")
-        vec = embed(query, client, config['deploy_embed'])
+        vec = with_retries(lambda: embed(query, client, config['deploy_embed']), attempts=1, initial_delay=0.4)
         logging.info(f"DEBUG: Embedding generated successfully, length={len(vec)}")
     except Exception as e:
         logging.error(f"DEBUG: Failed to generate embedding: {e}")
@@ -195,7 +212,7 @@ def retrieve(query: str, iso_codes: list[str], client: AzureOpenAI, config: dict
     logging.info(f"DEBUG: Payload keys: {list(payload.keys())}")
     
     try:
-        response = requests.post(search_url, headers=headers, json=payload)
+        response = with_retries(lambda: requests.post(search_url, headers=headers, json=payload, timeout=15), attempts=1, initial_delay=0.4)
         logging.info(f"DEBUG: Search response status: {response.status_code}")
         response.raise_for_status()
         raw_results = response.json().get('value', [])
@@ -512,13 +529,17 @@ def chat(question: str, client: AzureOpenAI, config: dict) -> str:
         # --- Step 1: Draft Answer ---
         logging.info("DEBUG: Step 4 - Calling OpenAI for draft answer...")
         try:
-            draft_resp = client.chat.completions.create(
-                model=config['deploy_chat'],
-                messages=[
-                    {"role": "system", "content": drafter_system_message},
-                    {"role": "user", "content": f"Context:\n{context}\n\nQuestion: {question}"}
-                ],
-                temperature=0.0, # Keep draft deterministic
+            draft_resp = with_retries(
+                lambda: client.chat.completions.create(
+                    model=config['deploy_chat'],
+                    messages=[
+                        {"role": "system", "content": drafter_system_message},
+                        {"role": "user", "content": f"Context:\n{context}\n\nQuestion: {question}"}
+                    ],
+                    temperature=0.0,
+                ),
+                attempts=1,
+                initial_delay=0.4
             )
             draft_answer = draft_resp.choices[0].message.content.strip()
             logging.info("DEBUG: Draft answer generated successfully")
@@ -567,14 +588,18 @@ Be extremely precise - only flag content as "missing" if genuinely absent, not j
             context = '\n'.join(truncated_lines) + "\n\n[Context truncated for systematic evaluation]"
 
         try:
-            refine_resp = client.chat.completions.create(
-                model=config['deploy_chat'], # Use the best model for this complex task
-                response_format={"type": "json_object"},
-                messages=[
-                    {"role": "system", "content": GRADER_REFINER_PROMPT},
-                    {"role": "user", "content": refiner_user_message}
-                ],
-                temperature=0.0,
+            refine_resp = with_retries(
+                lambda: client.chat.completions.create(
+                    model=config['deploy_chat'],
+                    response_format={"type": "json_object"},
+                    messages=[
+                        {"role": "system", "content": GRADER_REFINER_PROMPT},
+                        {"role": "user", "content": refiner_user_message}
+                    ],
+                    temperature=0.0,
+                ),
+                attempts=1,
+                initial_delay=0.4
             )
             refined_output_json = refine_resp.choices[0].message.content.strip()
             logging.info("DEBUG: Refined answer generated successfully")
@@ -586,31 +611,31 @@ Be extremely precise - only flag content as "missing" if genuinely absent, not j
         try:
             refined_data = json.loads(refined_output_json)
             
-        #    # Extract evaluation metrics for logging and debugging
-        #    evaluation = refined_data.get('evaluation', {})
-        #    if 'recall_analysis' in evaluation:
-        #        recall_score = evaluation['recall_analysis'].get('recall_score', 'N/A')
-        #        logging.info(f"DEBUG: Evaluation recall score: {recall_score}")
-        #    if 'precision_analysis' in evaluation:
-        #        precision_score = evaluation['precision_analysis'].get('precision_score', 'N/A')
-        #        logging.info(f"DEBUG: Evaluation precision score: {precision_score}")
-        #    if 'f1_score' in evaluation:
-        #        f1_score = evaluation.get('f1_score', 'N/A')
-        #        logging.info(f"DEBUG: Evaluation F1 score: {f1_score}")
-        #    
-        #    # Log missing facts and unsupported claims for debugging
-        #    missing_facts = evaluation.get('missing_facts', [])
-        #    unsupported_claims = evaluation.get('unsupported_claims', [])
-        #    logging.info(f"DEBUG: Missing facts count: {len(missing_facts)}")
-        #    logging.info(f"DEBUG: Unsupported claims count: {len(unsupported_claims)}")
-        #    
-        #    # Log jurisdiction coverage for multi-country queries
-        #    if 'recall_analysis' in evaluation:
-        #        jurisdictions_covered = evaluation['recall_analysis'].get('jurisdictions_covered', [])
-        #        jurisdictions_missing = evaluation['recall_analysis'].get('jurisdictions_missing', [])
-        #        logging.info(f"DEBUG: Jurisdictions covered: {jurisdictions_covered}")
-        #        logging.info(f"DEBUG: Jurisdictions missing facts: {jurisdictions_missing}")
-        #        logging.info(f"DEBUG: Multi-jurisdictional coverage: {len(jurisdictions_covered)} covered, {len(jurisdictions_missing)} incomplete")
+            # Extract evaluation metrics for logging and debugging
+            evaluation = refined_data.get('evaluation', {})
+            if 'recall_analysis' in evaluation:
+                recall_score = evaluation['recall_analysis'].get('recall_score', 'N/A')
+                logging.info(f"DEBUG: Evaluation recall score: {recall_score}")
+            if 'precision_analysis' in evaluation:
+                precision_score = evaluation['precision_analysis'].get('precision_score', 'N/A')
+                logging.info(f"DEBUG: Evaluation precision score: {precision_score}")
+            if 'f1_score' in evaluation:
+                f1_score = evaluation.get('f1_score', 'N/A')
+                logging.info(f"DEBUG: Evaluation F1 score: {f1_score}")
+            
+            # Log missing facts and unsupported claims for debugging
+            missing_facts = evaluation.get('missing_facts', [])
+            unsupported_claims = evaluation.get('unsupported_claims', [])
+            logging.info(f"DEBUG: Missing facts count: {len(missing_facts)}")
+            logging.info(f"DEBUG: Unsupported claims count: {len(unsupported_claims)}")
+            
+            # Log jurisdiction coverage for multi-country queries
+            if 'recall_analysis' in evaluation:
+                jurisdictions_covered = evaluation['recall_analysis'].get('jurisdictions_covered', [])
+                jurisdictions_missing = evaluation['recall_analysis'].get('jurisdictions_missing', [])
+                logging.info(f"DEBUG: Jurisdictions covered: {jurisdictions_covered}")
+                logging.info(f"DEBUG: Jurisdictions missing facts: {jurisdictions_missing}")
+                logging.info(f"DEBUG: Multi-jurisdictional coverage: {len(jurisdictions_covered)} covered, {len(jurisdictions_missing)} incomplete")
             
             # Get the refined answer (should already include header since we evaluated draft_with_header)
             answer = refined_data.get('refined_answer', '')
@@ -618,30 +643,12 @@ Be extremely precise - only flag content as "missing" if genuinely absent, not j
             
         except json.JSONDecodeError as json_error:
             logging.error(f"DEBUG: Failed to decode systematic evaluation JSON: {json_error}")
-        #    logging.error(f"DEBUG: Raw refiner output: {refined_output_json[:500]}...")
-            # Fallback to the draft with header if the refiner fails
-            refined_data = {
-                "evaluation": {
-                    "error": "Systematic evaluation output was not valid JSON.", 
-                    "raw_output": refined_output_json,
-                    "fallback_used": True
-                },
-                "refined_answer": draft_with_header
-            }
-            answer = draft_with_header
+            # Do not degrade answer quality: bubble up to trigger retry at caller/front-end
+            raise
 
         logging.info("DEBUG: Step 8 - Building final systematic evaluation response")
         # Return the complete evaluation data for debugging and quality monitoring
         evaluation_data = refined_data.get('evaluation', {})
-    #    final_response = {
-    #        "refined_answer": answer,
-    #        "evaluation_metrics": evaluation_data,
-    #        "country_header_included": True,
-    #        "systematic_evaluation": True,
-    #        "jurisdiction_aware_evaluation": True,
-    #        "detected_countries": iso_codes,
-    #        "sources_count": len(chunks)
-    #    }
         final_response = {
             "country_header": header,
             "refined_answer": answer
@@ -652,11 +659,16 @@ Be extremely precise - only flag content as "missing" if genuinely absent, not j
         
     except Exception as e:
         logging.error(f"DEBUG: Chat function failed at some step: {e}", exc_info=True)
-        return json.dumps({"error": f"Chat function failed: {str(e)}"})
+        # Bubble up to main() so that a proper 5xx is returned and the front-end can retry
+        raise
 
 # --- Azure Function Main Entry Point ---
 def main(req: func.HttpRequest) -> func.HttpResponse:
     logging.info('API function invoked.')
+
+    # Lightweight health check to warm instance without heavy work
+    if req.params.get('ping'):
+        return func.HttpResponse("ok", mimetype="text/plain", status_code=200)
 
     # 1. Load and validate all required environment variables
     try:

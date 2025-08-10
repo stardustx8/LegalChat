@@ -1057,16 +1057,41 @@
             }
         }
         
+        // Lightweight fetch with a single retry for transient backend failures (5xx) or network errors
+        async function fetchWithRetry(url, options = {}, retries = 1, backoffMs = 500) {
+            for (let attempt = 0; attempt <= retries; attempt++) {
+                try {
+                    const resp = await fetch(url, options);
+                    // Retry on transient server errors
+                    if (resp.status >= 500 && resp.status < 600) {
+                        if (attempt < retries) {
+                            await new Promise(r => setTimeout(r, backoffMs));
+                            continue;
+                        }
+                    }
+                    return resp;
+                } catch (err) {
+                    if (attempt < retries) {
+                        await new Promise(r => setTimeout(r, backoffMs));
+                        continue;
+                    }
+                    throw err;
+                }
+            }
+        }
+        
         // Initialize when DOM is ready
         document.addEventListener('DOMContentLoaded', function() {
             console.log('DEBUG: DOMContentLoaded event fired');
+            // Pre-warm the API function host to reduce first-click cold start
+            try { fetch('/api/ask?ping=1', { method: 'GET' }); } catch (e) { /* ignore */ }
             const askButton = document.getElementById('askButton');
             const questionInput = document.getElementById('question');
             const responseArea = document.getElementById('response-area');
             const fullJsonResponseDiv = document.getElementById('full-json-response');
             const countryHeaderContainer = document.getElementById('country-header-container');
             const refinedAnswerContainer = document.getElementById('refined-answer-container');
-            
+        
             console.log('DEBUG: Setting up askButton event listener');
             askButton.addEventListener('click', async () => {
                 const question = questionInput.value.trim();
@@ -1083,13 +1108,13 @@
             refinedAnswerContainer.innerHTML = '';
 
             try {
-                const response = await fetch('/api/ask', {
+                const response = await fetchWithRetry('/api/ask', {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json'
                     },
                     body: JSON.stringify({ question })
-                });
+                }, 1, 500);
 
                 if (response.ok) {
                     const data = await response.json(); // Parse the JSON response
