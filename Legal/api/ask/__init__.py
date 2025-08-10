@@ -304,8 +304,9 @@ DRAFTER_SYSTEM_MESSAGE = (
     " '## Details'. Be concise and precise. Use only information present in the CONTEXT."
     " Do not include technical chunk identifiers. Prioritize maximum usefulness and completeness for an amateur legal reader."
     " Always explicitly cover: (1) definitions/classifications and any statutory carve-outs or exemptions, (2) age thresholds and permit eligibility/issuance rules,"
-    " (3) required permits/procedures, and (4) penalties/enforcement where applicable."
-    " Within '## Details', organize with bolded subheadings when relevant: Definitions & Carve-outs; Age & Eligibility; Permits & Procedures; Penalties & Enforcement; Jurisdiction Notes."
+    " (3) required permits/procedures, (4) penalties/enforcement, (5) any authoritative interpretations/guidance (agency or court) that clarify definitions/classifications,"
+    " (6) safe storage/keeping and loss/theft reporting obligations, and (7) measurement methodology for legal thresholds (e.g., how blade or overall length is measured) where present."
+    " Within '## Details', organize with bolded subheadings when relevant: Definitions & Carve-outs; Age & Eligibility; Permits & Procedures; Penalties & Enforcement; Practical Compliance & Measurement; Jurisdiction Notes."
     " If age thresholds imply a rule for minors (e.g., minimum age \u2265 18), state the implication explicitly (e.g., permits are not issued to minors), without adding facts not present in the CONTEXT."
 )
 
@@ -336,6 +337,9 @@ From the CONTEXT documents, create a comprehensive inventory of ALL relevant leg
 - Age limits and permit eligibility/issuance rules (derive direct implications; e.g., if minimum age \u2265 N then minors < N cannot obtain permits)
 - Cross-border/international provisions (transit, import/export rules)
 - Penalties and consequences (what happens if violated)
+- Authoritative interpretations/guidance (agency circulars, practice notes, court decisions) that clarify definitions/classifications or enforcement practice
+- Safe storage/keeping and loss/theft reporting obligations
+- Measurement methodology for legal thresholds (e.g., blade length, overall length; how measured)
 - Temporal aspects (time limits, validity periods)
 - Location-specific rules (public vs private, specific venues)
 - Conditional requirements (if X then Y rules)
@@ -351,37 +355,21 @@ From the CONTEXT documents, create a comprehensive inventory of ALL relevant leg
 For EACH fact in your ground truth inventory (ensuring complete coverage of ALL jurisdictions):
 
 **RECALL CHECK**: Is this fact present in the draft?
-- ✅ PRESENT: Fact is clearly stated (may use different wording)
-- ❌ MISSING: Fact is completely absent
-- ⚠️ UNCLEAR: Fact is mentioned but lacks clarity/precision
+- PRESENT: Fact is clearly stated (may use different wording)
+- MISSING: Fact is completely absent
+- UNCLEAR: Fact is mentioned but lacks clarity/precision
 
 **PRECISION CHECK** (RAG-Only): For each claim in the draft:
-- ✅ SUPPORTED: Claim has exact textual support in provided CONTEXT
-- ❌ UNSUPPORTED: Claim lacks any support in the provided CONTEXT documents
-- ⚠️ IMPRECISE: Claim misquotes or misrepresents the provided text
-- 🚫 EXTERNAL: Claim appears to use knowledge not found in provided CONTEXT (flag as unsupported)
+- SUPPORTED: Claim has exact textual support in provided CONTEXT
+- UNSUPPORTED: Claim lacks any support in the provided CONTEXT documents
+- IMPRECISE: Claim misquotes or misrepresents the provided text
+- EXTERNAL: Claim appears to use knowledge not found in provided CONTEXT (flag as unsupported)
 
 ### Semantics and Logical Equivalence Policy
 - Treat paraphrases and synonyms as PRESENT when the meaning is unambiguous (e.g., brand-based generic terms that clearly refer to a tool category).
 - Apply direct logical implications from explicit numeric thresholds (e.g., if the minimum age is 18, then permits are not issued to minors). Do not invent implications beyond what the text directly supports.
 - Avoid false negatives: do not mark facts as missing when the concept is clearly conveyed under synonymous or logically equivalent phrasing.
 - RAG-Only remains in force: never add facts that are not supported by the provided CONTEXT.
-
-### Step 3: Calculate Objective Metrics
-- **Recall** = (Facts correctly included) / (Total relevant facts)
-- **Precision** = (Supported claims) / (Total claims made)
-- **F1 Score** = 2 × (Precision × Recall) / (Precision + Recall)
-
-### Step 4: Produce Refined Answer
-Create an improved answer that:
-- Includes ALL missing relevant facts from ground truth
-- Preserves all correct elements from the draft
-- Ensures every claim has proper source support
-- Presents information in a clear, professional manner without technical chunk references
-- Only includes citations that appear naturally within the original source documents
-- **MAINTAINS MARKDOWN STRUCTURE**: Preserve the exact section format with ## Summary and ## Details headings
- - Explicitly incorporate user-impactful carve-outs/exemptions and age-based permit eligibility/issuance constraints when present in the CONTEXT
- - Where age thresholds imply a rule for minors, state the implication explicitly (without adding facts not present in CONTEXT)
 
 ## CRITICAL EVALUATION RULES
 
