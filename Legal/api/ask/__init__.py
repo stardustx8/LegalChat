@@ -393,7 +393,6 @@ INSTRUCTIONS: Answer using only the CONTEXT; be concise and precise.
             refine_resp = with_retries(
                 lambda: client.chat.completions.create(
                     model=config['deploy_chat'],
-                    response_format={"type": "json_object"},
                     messages=[
                         {"role": "system", "content": GRADER_REFINER_PROMPT},
                         {"role": "user", "content": refiner_user_message}
@@ -403,7 +402,7 @@ INSTRUCTIONS: Answer using only the CONTEXT; be concise and precise.
                 attempts=2,
                 initial_delay=0.4
             )
-            refined_output_json = refine_resp.choices[0].message.content.strip()
+            refined_output_text = refine_resp.choices[0].message.content.strip()
             logging.info("DEBUG: Refined answer generated successfully")
             llm_ms = int((time.monotonic() - t_llm_start) * 1000)
             logging.info(f"TIMING: llm_refine_ms={llm_ms}")
@@ -411,48 +410,45 @@ INSTRUCTIONS: Answer using only the CONTEXT; be concise and precise.
             logging.error(f"DEBUG: Refine step failed: {refine_error}")
             raise
 
-        logging.info("DEBUG: Step 7 - Processing systematic evaluation JSON response")
+        logging.info("DEBUG: Step 7 - Processing model response")
+        answer = ""
+        refined_data = {}
         try:
-            refined_data = json.loads(refined_output_json)
-            
-            # Extract evaluation metrics for logging and debugging
-            evaluation = refined_data.get('evaluation', {})
-            if 'recall_analysis' in evaluation:
-                recall_score = evaluation['recall_analysis'].get('recall_score', 'N/A')
-                logging.info(f"DEBUG: Evaluation recall score: {recall_score}")
-            if 'precision_analysis' in evaluation:
-                precision_score = evaluation['precision_analysis'].get('precision_score', 'N/A')
-                logging.info(f"DEBUG: Evaluation precision score: {precision_score}")
-            if 'f1_score' in evaluation:
-                f1_score = evaluation.get('f1_score', 'N/A')
-                logging.info(f"DEBUG: Evaluation F1 score: {f1_score}")
-            
-            # Log missing facts and unsupported claims for debugging
-            missing_facts = evaluation.get('missing_facts', [])
-            unsupported_claims = evaluation.get('unsupported_claims', [])
-            logging.info(f"DEBUG: Missing facts count: {len(missing_facts)}")
-            logging.info(f"DEBUG: Unsupported claims count: {len(unsupported_claims)}")
-            
-            # Log jurisdiction coverage for multi-country queries
-            if 'recall_analysis' in evaluation:
-                jurisdictions_covered = evaluation['recall_analysis'].get('jurisdictions_covered', [])
-                jurisdictions_missing = evaluation['recall_analysis'].get('jurisdictions_missing', [])
-                logging.info(f"DEBUG: Jurisdictions covered: {jurisdictions_covered}")
-                logging.info(f"DEBUG: Jurisdictions missing facts: {jurisdictions_missing}")
-                logging.info(f"DEBUG: Multi-jurisdictional coverage: {len(jurisdictions_covered)} covered, {len(jurisdictions_missing)} incomplete")
-            
-            # Get the refined answer (should already include header since we evaluated draft_with_header)
-            answer = refined_data.get('refined_answer', '')
-            logging.info("DEBUG: Systematic evaluation JSON parsing successful")
-            
-        except json.JSONDecodeError as json_error:
-            logging.error(f"DEBUG: Failed to decode systematic evaluation JSON: {json_error}")
-            # Do not degrade answer quality: bubble up to trigger retry at caller/front-end
-            raise
+            # Try to parse JSON if the model returned structured data
+            parsed = json.loads(refined_output_text)
+            if isinstance(parsed, dict) and 'refined_answer' in parsed:
+                refined_data = parsed
+                # Optional evaluation logging if present
+                evaluation = refined_data.get('evaluation', {})
+                if 'recall_analysis' in evaluation:
+                    recall_score = evaluation['recall_analysis'].get('recall_score', 'N/A')
+                    logging.info(f"DEBUG: Evaluation recall score: {recall_score}")
+                if 'precision_analysis' in evaluation:
+                    precision_score = evaluation['precision_analysis'].get('precision_score', 'N/A')
+                    logging.info(f"DEBUG: Evaluation precision score: {precision_score}")
+                if 'f1_score' in evaluation:
+                    f1_score = evaluation.get('f1_score', 'N/A')
+                    logging.info(f"DEBUG: Evaluation F1 score: {f1_score}")
+                missing_facts = evaluation.get('missing_facts', [])
+                unsupported_claims = evaluation.get('unsupported_claims', [])
+                logging.info(f"DEBUG: Missing facts count: {len(missing_facts)}")
+                logging.info(f"DEBUG: Unsupported claims count: {len(unsupported_claims)}")
+                if 'recall_analysis' in evaluation:
+                    jurisdictions_covered = evaluation['recall_analysis'].get('jurisdictions_covered', [])
+                    jurisdictions_missing = evaluation['recall_analysis'].get('jurisdictions_missing', [])
+                    logging.info(f"DEBUG: Jurisdictions covered: {jurisdictions_covered}")
+                    logging.info(f"DEBUG: Jurisdictions missing facts: {jurisdictions_missing}")
+                answer = refined_data.get('refined_answer', '')
+                logging.info("DEBUG: Model returned structured JSON; using 'refined_answer'")
+            else:
+                answer = refined_output_text
+                logging.info("DEBUG: Model returned plain text; using raw text answer")
+        except Exception:
+            # Non-JSON or unexpected format: use raw text
+            answer = refined_output_text
+            logging.info("DEBUG: Model returned non-JSON or parse failed; using raw text answer")
 
         logging.info("DEBUG: Step 8 - Building final systematic evaluation response")
-        # Return the complete evaluation data for debugging and quality monitoring
-        evaluation_data = refined_data.get('evaluation', {})
         final_response = {
             "country_header": header,
             "refined_answer": answer
