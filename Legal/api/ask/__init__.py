@@ -1,13 +1,16 @@
 import logging
-import os, json, requests, re, time
+import os, json, requests, re, time, random
 import azure.functions as func
+from requests.adapters import HTTPAdapter
 from openai import AzureOpenAI
 
 # --- Prompts and Helper Functions ---
 # Note: Environment variables are loaded within the main() function to prevent module-level errors.
 
-def with_retries(fn, attempts=1, initial_delay=0.4, factor=2.0):
-    """Retry helper: runs fn() with a small exponential backoff."""
+def with_retries(fn, attempts=1, initial_delay=0.4, factor=2.0, jitter=0.1, max_delay=5.0):
+    """Retry helper: runs fn() with exponential backoff and jitter.
+    attempts denotes the number of additional retries beyond the first attempt.
+    """
     delay = initial_delay
     last_exc = None
     for i in range(attempts + 1):
@@ -15,10 +18,31 @@ def with_retries(fn, attempts=1, initial_delay=0.4, factor=2.0):
             return fn()
         except Exception as e:
             last_exc = e
+            logging.warning(f"Retryable error on attempt {i+1}/{attempts+1}: {e}")
             if i == attempts:
                 raise
-            time.sleep(delay)
+            sleep_for = min(delay + (random.random() * jitter), max_delay)
+            time.sleep(sleep_for)
             delay *= factor
+
+# Connection pooling for outbound HTTP (e.g., Azure Cognitive Search)
+SESSION = None
+
+def get_session() -> requests.Session:
+    global SESSION
+    if SESSION is None:
+        s = requests.Session()
+        adapter = HTTPAdapter(pool_connections=10, pool_maxsize=10)
+        s.mount('http://', adapter)
+        s.mount('https://', adapter)
+        SESSION = s
+    return SESSION
+
+def _post_and_raise(session: requests.Session, url: str, headers: dict, payload: dict, timeout: int = 15) -> requests.Response:
+    """POST helper that raises for HTTP errors so retries can trigger properly."""
+    resp = session.post(url, headers=headers, json=payload, timeout=timeout)
+    resp.raise_for_status()
+    return resp
 
 COUNTRY_DETECTION_PROMPT = """
 ROLE
@@ -143,7 +167,7 @@ def extract_iso_codes(text: str, client: AzureOpenAI, deploy_chat: str) -> list[
                 ],
                 temperature=0.0,
             ),
-            attempts=1,
+            attempts=2,
             initial_delay=0.4
         )
         raw_content = response.choices[0].message.content.strip()
@@ -180,7 +204,7 @@ def retrieve(query: str, iso_codes: list[str], client: AzureOpenAI, config: dict
     
     try:
         logging.info("DEBUG: Generating embedding for query...")
-        vec = with_retries(lambda: embed(query, client, config['deploy_embed']), attempts=1, initial_delay=0.4)
+        vec = with_retries(lambda: embed(query, client, config['deploy_embed']), attempts=2, initial_delay=0.4)
         logging.info(f"DEBUG: Embedding generated successfully, length={len(vec)}")
     except Exception as e:
         logging.error(f"DEBUG: Failed to generate embedding: {e}")
@@ -211,8 +235,9 @@ def retrieve(query: str, iso_codes: list[str], client: AzureOpenAI, config: dict
     logging.info(f"DEBUG: Search k adjusted from {k} to {search_k} for {len(iso_codes)} countries")
     logging.info(f"DEBUG: Payload keys: {list(payload.keys())}")
     
+    session = get_session()
     try:
-        response = with_retries(lambda: requests.post(search_url, headers=headers, json=payload, timeout=15), attempts=1, initial_delay=0.4)
+        response = with_retries(lambda: _post_and_raise(session, search_url, headers, payload), attempts=2, initial_delay=0.4)
         logging.info(f"DEBUG: Search response status: {response.status_code}")
         response.raise_for_status()
         raw_results = response.json().get('value', [])
@@ -418,146 +443,26 @@ def chat(question: str, client: AzureOpenAI, config: dict) -> str:
             logging.info("DEBUG: Returning no-docs message")
             return header + no_docs_message
 
-        logging.info("DEBUG: Step 3 - Preparing context and drafting")
-        drafter_system_message = """
-{
-  "role": "expert_legal_research_assistant",
-  "private_thought_key": "internal_chain_of_thought",
-
-  /*―――――――――― WORKFLOW ――――――――――*/
-  "workflow": [
-    { "step": "collect_passages",
-      "action": "retrieve candidate chunks responsive to the user question" },
-
-    { "step": "re_rank",
-      "action": "order candidates by combined semantic + lexical relevance" },
-
-    { "step": "necessity_filter",
-      "action": "KEEP a passage only if removing it would break support for ≥ 1 intended public statement" },
-
-    { "step": "scope_lock",
-      "action": "Identify the legal object(s) & jurisdiction(s); DROP passages about other objects or places" },
-
-    { "step": "salience_upgrade",
-      "action": "From the kept passages extract every element that conditions legality:  \n                 • numeric thresholds (length, amount, age, time, penalty, etc.)  \n                 • categorical qualifiers (e.g. “automatic”, “concealed”, “professional use”)  \n                 • explicit exceptions / carve‑outs / special categories (e.g. butterfly knives, antique items)  \n                 • permit / licence or exemption regimes  \n                 • enforcement or penalty provisions  \n                 • age or capacity prerequisites explicitly stated in the text  \n                 • lawful‑tool / dangerous‑object clauses  \n                 Mark **each** item as MUST‑MENTION verbatim (units included)." },
-
-    { "step": "deduplicate",
-      "action": "When two passages support the same atomic fact, keep the shorter, more precise one" },
-
-    { "step": "draft_answer",
-      "action": "Write exactly two sections:  \n                 – TL;DR Summary: bullet list; every bullet begins with a bold key phrase, includes all relevant MUST‑MENTION items for that point.  \n                 – Detailed Explanation: flowing prose with clear, professional language.  \n                 Do NOT add tables, extra headings, or technical chunk citations." },
-
-    { "step": "citation_pruner",
-      "action": "Review content for clarity and completeness; ensure all factual claims are supported by the provided context." },
-
-    { "step": "fact_source_check",
-      "action": "For EVERY factual fragment: confirm it is explicitly present (or directly inferable) in at least one provided passage.  \n                 – If a claim is *negative* (e.g. "no age restriction", "no permit required") you must either:  \n                   (a) reference a passage that expressly states the absence, OR  \n                   (b) write "The supplied sources do not address …".  \n                 – If support is lacking: delete, rewrite, or express uncertainty with qualifying language." },
-
-    { "step": "permit_check",
-      "action": "If any kept passage mentions a permit, licence, or exemption regime, ensure TL;DR contains a bullet that names the rule, states whether the object requires it, and cites the permit passage.  Fail otherwise." },
-
-    { "step": "alignment_check",
-      "action": "Fail if:  \n                 (a) any sentence lacks a citation;  \n                 (b) a citation points to a dropped passage;  \n                 (c) ANY MUST‑MENTION item is missing or altered;  \n                 (d) output contains forbidden tables or headings." },
-
-    { "step": "format_guard",
-      "action": "Final sweep: ensure only the two authorised markdown headings; strip stray blank lines; verify no sentence is citation‑free." }
-  ],
-
-  /*―――――――― CITATION POLICY ――――――――*/
-  "citation_policy": {
-    "in_corpus": "Present information in clear, professional language without technical chunk references. Only include citations that appear naturally within the source documents themselves.",
-    "external_quote": "Reproduce any citation strings that appear verbatim within the original source documents"
-  },
-
-  /*―――――――― OUTPUT FORMAT ――――――――*/
-  "output_format": {
-    "sections": ["TL;DR Summary", "Detailed Explanation"],
-    "markdown_headings": true
-    /* no hard limits—provide all salient information */
-  },
-
-  /*―――――――― FAILURE MODES ――――――――*/
-  "failure_modes": {
-    "no_relevant_passages": "<CASEB>",
-    "validation_error": "<PROMPT‑VIOLATION>"
-  },
-
-  /*―――――――― REFERENCE EXAMPLES (few‑shot guidance) ――――――――*/
-  "reference_examples": [
-    {
-      "input": "I am a professional chef commuting by car in Switzerland. May I keep my 20 cm kitchen knife in the glove box while driving to work?",
-      "retained_passages": ["KL CH §1.1", "KL CH §1.3", "KL CH §1.4"],
-      "must_mention": ["automatic one‑hand opening mechanism (absent)", "tool purpose legitimises carry"],
-      "assistant_output": {
-        "TL;DR Summary": [
-          "A fixed 20 cm chef’s knife is **not a weapon** because it lacks an automatic one‑hand opening mechanism",
-          "Transport is lawful when clearly for work and stowed safely; brandishing could re‑classify it as a dangerous object.",
-          "Employers or parking‑lot owners may still ban knives.",
-          "You can be punished for misdemeanour (Weapon's Act)."
-        ],
-        "Detailed Explanation": "Under the Swiss Weapons Act, only folding or dagger‑type knives meeting the one‑hand‑opening and length thresholds are weapons. A chef’s knife is treated as a tool. Keeping it in a sheath or roll inside the glove box demonstrates legitimate use. Visible or threatening display could trigger the ‘dangerous object’ clause. The Weapons Act implies misdemeanour penalties. Venue rules may override federal permissiveness. [...]"
-      }
-    },
-    {
-      "input": "I commute between Switzerland and Germany and transit EuroAirport with a 10 cm lockable knife; may I carry it?",
-      "retained_passages": ["KL CH §1.1", "KL CH §1.3", "KL CH §1.4", "KL DE §42a Absatz 1", "KL CH‑EU‑ASM Art 4"],
-      "must_mention": ["automatic one‑hand opening mechanism", "German §42a public‑carry ban", "EU blade > 6 cm aviation limit"],
-      "assistant_output": {
-        "TL;DR Summary": [
-          "**Switzerland**: Knife is legal if it lacks automatic one‑hand opening and is carried as a tool.",
-          "**Germany**: One‑hand lockable knives barred from public carry (§42a Abs 1 WaffG).",
-          "**EuroAirport**: EU rule forbids blades > 6 cm in security zones (Reg (EU) 2015/1998 Att 4‑C)."
-        ],
-        "Detailed Explanation": "Swiss law treats non‑one‑hand lockable knives as tools; improper display triggers the dangerous‑object clause. German §42a bans public carry of lockable one‑hand knives unless a statutory exception applies. EuroAirport enforces EU aviation security rules: blades over 6 cm cannot pass passenger checkpoints. [...]"
-      }
-    }
-  ]
-}
-        """
-        # Build structured context with source mapping for systematic evaluation
+        logging.info("DEBUG: Step 3 - Preparing context for single-pass answer generation")
+        # Build structured context with source mapping
         structured_context = []
         for i, chunk in enumerate(chunks):
             structured_context.append(f"**SOURCE {i+1}: KL {chunk['iso_code']} (Document Section)**\n{chunk['chunk']}")
-        
+
         context = "\n\n---\n\n".join(structured_context)
         logging.info(f"DEBUG: Structured context built with {len(chunks)} sources, {len(context)} characters")
         # Build jurisdiction list for logging
         jurisdiction_list = [f"KL {chunk['iso_code']}" for chunk in chunks]
         logging.info(f"DEBUG: Sources by jurisdiction: {jurisdiction_list}")
         logging.info(f"DEBUG: Jurisdiction-aware evaluation will expect comprehensive coverage of: {iso_codes}")
-        
-        # --- Step 1: Draft Answer ---
-        logging.info("DEBUG: Step 4 - Calling OpenAI for draft answer...")
-        try:
-            draft_resp = with_retries(
-                lambda: client.chat.completions.create(
-                    model=config['deploy_chat'],
-                    messages=[
-                        {"role": "system", "content": drafter_system_message},
-                        {"role": "user", "content": f"Context:\n{context}\n\nQuestion: {question}"}
-                    ],
-                    temperature=0.0,
-                ),
-                attempts=1,
-                initial_delay=0.4
-            )
-            draft_answer = draft_resp.choices[0].message.content.strip()
-            logging.info("DEBUG: Draft answer generated successfully")
-        except Exception as draft_error:
-            logging.error(f"DEBUG: Draft step failed: {draft_error}")
-            raise
 
-        logging.info("DEBUG: Step 5 - Building response header")
-        # Build the dynamic markdown table header
+        # Build the dynamic markdown table header for UI (not passed to the model)
         found_iso_codes = {chunk['iso_code'] for chunk in chunks}
         header = build_response_header(iso_codes, found_iso_codes)
-        
-        # Prepend header to the draft answer before sending to refiner
-        draft_with_header = header + draft_answer
-        logging.info("DEBUG: Header built and prepended to draft")
+        logging.info("DEBUG: Header built for UI")
 
         # --- Step 2: Grade and Refine Answer ---
-        logging.info("DEBUG: Step 6 - Calling OpenAI for refining...")
+        logging.info("DEBUG: Step 4 - Calling OpenAI for single-pass refine/answer...")
         refiner_user_message = f"""
 QUESTION:
 {question}
@@ -565,17 +470,8 @@ QUESTION:
 CONTEXT DOCUMENTS:
 {context}
 
-DRAFT ANSWER TO EVALUATE:
-{draft_with_header}
-
-Apply the systematic evaluation methodology to:
-1. Extract all relevant legal facts from the context
-2. Check which facts are present/missing in the draft
-3. Verify source support for all draft claims
-4. Calculate objective recall/precision metrics
-5. Produce a comprehensive refined answer
-
-Be extremely precise - only flag content as "missing" if genuinely absent, not just differently worded.
+INSTRUCTIONS:
+Using the methodology, produce the best final answer directly. No draft is provided. Ensure high precision, jurisdiction coverage, and adherence to citation/presentation rules. Return JSON with 'evaluation' and 'refined_answer'.
 """
         logging.info(f"DEBUG: Systematic evaluation message length: {len(refiner_user_message)} characters")
         
@@ -598,7 +494,7 @@ Be extremely precise - only flag content as "missing" if genuinely absent, not j
                     ],
                     temperature=0.0,
                 ),
-                attempts=1,
+                attempts=2,
                 initial_delay=0.4
             )
             refined_output_json = refine_resp.choices[0].message.content.strip()
