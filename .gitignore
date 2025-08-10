@@ -49,3 +49,4 @@ env/
 
 # Azure Functions local settings
 local.settings.json
+backups/
