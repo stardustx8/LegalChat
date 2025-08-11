@@ -424,7 +424,7 @@ Provide a JSON response with this exact structure:
 - Present information professionally without technical chunk citations
 """
 
-def chat(question: str, client: AzureOpenAI, config: dict) -> str:
+def chat(question: str, client: AzureOpenAI, config: dict, grade: bool = False) -> str:
     """Orchestrates the RAG pipeline to answer a question."""
     logging.info("DEBUG: Starting chat function")
     t_total_start = time.monotonic()
@@ -539,91 +539,95 @@ def chat(question: str, client: AzureOpenAI, config: dict) -> str:
             logging.error(f"DEBUG: Draft step failed: {draft_error}")
             raise
 
-        # Step 5: Grade and refine the draft using the full grader prompt
-        logging.info("DEBUG: Step 5 - Grading and refining draft...")
-        refiner_user_message = (
-            f"CONTEXT:\n{context}\n\n"
-            f"QUESTION:\n{question}\n\n"
-            f"DRAFT_ANSWER:\n{draft_answer}\n\n"
-            f"Return the exact JSON structure specified in the system message."
-        )
-        logging.info(f"DEBUG: Systematic evaluation message length: {len(refiner_user_message)} characters")
-
-        # Conservative token limit for systematic evaluation with structured context
-        if len(refiner_user_message) > 40000:
-            logging.warning("DEBUG: Message too long for systematic evaluation, truncating context")
-            # Preserve source structure while truncating
-            context_lines = context.split('\n')
-            truncated_lines = context_lines[:int(len(context_lines) * 0.7)]  # Keep 70% of context
-            context = '\n'.join(truncated_lines) + "\n\n[Context truncated for systematic evaluation]"
-            # Rebuild message after truncation
+        answer = ""
+        refined_data = {}
+        if grade:
+            # Step 5: Grade and refine the draft using the full grader prompt
+            logging.info("DEBUG: Step 5 - Grading and refining draft...")
             refiner_user_message = (
                 f"CONTEXT:\n{context}\n\n"
                 f"QUESTION:\n{question}\n\n"
                 f"DRAFT_ANSWER:\n{draft_answer}\n\n"
                 f"Return the exact JSON structure specified in the system message."
             )
+            logging.info(f"DEBUG: Systematic evaluation message length: {len(refiner_user_message)} characters")
 
-        try:
-            t_llm_start = time.monotonic()
-            refine_resp = with_retries(
-                lambda: client.chat.completions.create(
-                    model=config['deploy_chat'],
-                    response_format={"type": "json_object"},
-                    messages=[
-                        {"role": "system", "content": GRADER_REFINER_PROMPT},
-                        {"role": "user", "content": refiner_user_message}
-                    ],
-                    temperature=0.0,
-                ),
-                attempts=2,
-                initial_delay=0.4
-            )
-            refined_output_text = refine_resp.choices[0].message.content.strip()
-            logging.info("DEBUG: Refined answer generated successfully")
-            llm_ms = int((time.monotonic() - t_llm_start) * 1000)
-            logging.info(f"TIMING: llm_refine_ms={llm_ms}")
-        except Exception as refine_error:
-            logging.error(f"DEBUG: Refine step failed: {refine_error}")
-            raise
+            # Conservative token limit for systematic evaluation with structured context
+            if len(refiner_user_message) > 40000:
+                logging.warning("DEBUG: Message too long for systematic evaluation, truncating context")
+                # Preserve source structure while truncating
+                context_lines = context.split('\n')
+                truncated_lines = context_lines[:int(len(context_lines) * 0.7)]  # Keep 70% of context
+                context = '\n'.join(truncated_lines) + "\n\n[Context truncated for systematic evaluation]"
+                # Rebuild message after truncation
+                refiner_user_message = (
+                    f"CONTEXT:\n{context}\n\n"
+                    f"QUESTION:\n{question}\n\n"
+                    f"DRAFT_ANSWER:\n{draft_answer}\n\n"
+                    f"Return the exact JSON structure specified in the system message."
+                )
 
-        logging.info("DEBUG: Step 7 - Processing model response")
-        answer = ""
-        refined_data = {}
-        try:
-            # Try to parse JSON if the model returned structured data
-            parsed = json.loads(refined_output_text)
-            if isinstance(parsed, dict) and 'refined_answer' in parsed:
-                refined_data = parsed
-                # Optional evaluation logging if present
-                evaluation = refined_data.get('evaluation', {})
-                if 'recall_analysis' in evaluation:
-                    recall_score = evaluation['recall_analysis'].get('recall_score', 'N/A')
-                    logging.info(f"DEBUG: Evaluation recall score: {recall_score}")
-                if 'precision_analysis' in evaluation:
-                    precision_score = evaluation['precision_analysis'].get('precision_score', 'N/A')
-                    logging.info(f"DEBUG: Evaluation precision score: {precision_score}")
-                if 'f1_score' in evaluation:
-                    f1_score = evaluation.get('f1_score', 'N/A')
-                    logging.info(f"DEBUG: Evaluation F1 score: {f1_score}")
-                missing_facts = evaluation.get('missing_facts', [])
-                unsupported_claims = evaluation.get('unsupported_claims', [])
-                logging.info(f"DEBUG: Missing facts count: {len(missing_facts)}")
-                logging.info(f"DEBUG: Unsupported claims count: {len(unsupported_claims)}")
-                if 'recall_analysis' in evaluation:
-                    jurisdictions_covered = evaluation['recall_analysis'].get('jurisdictions_covered', [])
-                    jurisdictions_missing = evaluation['recall_analysis'].get('jurisdictions_missing', [])
-                    logging.info(f"DEBUG: Jurisdictions covered: {jurisdictions_covered}")
-                    logging.info(f"DEBUG: Jurisdictions missing facts: {jurisdictions_missing}")
-                answer = refined_data.get('refined_answer', '')
-                logging.info("DEBUG: Model returned structured JSON; using 'refined_answer'")
-            else:
+            try:
+                t_llm_start = time.monotonic()
+                refine_resp = with_retries(
+                    lambda: client.chat.completions.create(
+                        model=config['deploy_chat'],
+                        response_format={"type": "json_object"},
+                        messages=[
+                            {"role": "system", "content": GRADER_REFINER_PROMPT},
+                            {"role": "user", "content": refiner_user_message}
+                        ],
+                        temperature=0.0,
+                    ),
+                    attempts=2,
+                    initial_delay=0.4
+                )
+                refined_output_text = refine_resp.choices[0].message.content.strip()
+                logging.info("DEBUG: Refined answer generated successfully")
+                llm_ms = int((time.monotonic() - t_llm_start) * 1000)
+                logging.info(f"TIMING: llm_refine_ms={llm_ms}")
+            except Exception as refine_error:
+                logging.error(f"DEBUG: Refine step failed: {refine_error}")
+                raise
+
+            logging.info("DEBUG: Step 7 - Processing model response")
+            try:
+                # Try to parse JSON if the model returned structured data
+                parsed = json.loads(refined_output_text)
+                if isinstance(parsed, dict) and 'refined_answer' in parsed:
+                    refined_data = parsed
+                    # Optional evaluation logging if present
+                    evaluation = refined_data.get('evaluation', {})
+                    if 'recall_analysis' in evaluation:
+                        recall_score = evaluation['recall_analysis'].get('recall_score', 'N/A')
+                        logging.info(f"DEBUG: Evaluation recall score: {recall_score}")
+                    if 'precision_analysis' in evaluation:
+                        precision_score = evaluation['precision_analysis'].get('precision_score', 'N/A')
+                        logging.info(f"DEBUG: Evaluation precision score: {precision_score}")
+                    if 'f1_score' in evaluation:
+                        f1_score = evaluation.get('f1_score', 'N/A')
+                        logging.info(f"DEBUG: Evaluation F1 score: {f1_score}")
+                    missing_facts = evaluation.get('missing_facts', [])
+                    unsupported_claims = evaluation.get('unsupported_claims', [])
+                    logging.info(f"DEBUG: Missing facts count: {len(missing_facts)}")
+                    logging.info(f"DEBUG: Unsupported claims count: {len(unsupported_claims)}")
+                    if 'recall_analysis' in evaluation:
+                        jurisdictions_covered = evaluation['recall_analysis'].get('jurisdictions_covered', [])
+                        jurisdictions_missing = evaluation['recall_analysis'].get('jurisdictions_missing', [])
+                        logging.info(f"DEBUG: Jurisdictions covered: {jurisdictions_covered}")
+                        logging.info(f"DEBUG: Jurisdictions missing facts: {jurisdictions_missing}")
+                    answer = refined_data.get('refined_answer', '')
+                    logging.info("DEBUG: Model returned structured JSON; using 'refined_answer'")
+                else:
+                    answer = refined_output_text
+                    logging.info("DEBUG: Model returned plain text; using raw text answer")
+            except Exception:
+                # Non-JSON or unexpected format: use raw text
                 answer = refined_output_text
-                logging.info("DEBUG: Model returned plain text; using raw text answer")
-        except Exception:
-            # Non-JSON or unexpected format: use raw text
-            answer = refined_output_text
-            logging.info("DEBUG: Model returned non-JSON or parse failed; using raw text answer")
+                logging.info("DEBUG: Model returned non-JSON or parse failed; using raw text answer")
+        else:
+            logging.info("DEBUG: Skipping grading/refinement (grade=False); using draft as final answer")
+            answer = draft_answer
 
         logging.info("DEBUG: Step 8 - Building final systematic evaluation response")
         final_response = {
@@ -631,7 +635,7 @@ def chat(question: str, client: AzureOpenAI, config: dict) -> str:
             "refined_answer": answer,
             "country_detection": country_detection,
             # Expose evaluation block (may be empty if model returned plain text)
-            "evaluation": refined_data.get('evaluation', {}),
+            "evaluation": refined_data.get('evaluation', {}) if grade else {},
             # Provide the draft so the UI can highlight refinements vs. the initial draft
             "draft_answer": draft_answer
         }
@@ -679,6 +683,15 @@ def main(req: func.HttpRequest) -> func.HttpResponse:
     # 2. Process the request and run the RAG pipeline
     try:
         question = req.params.get('question')
+        # Optional grading flag
+        def to_bool(val):
+            if isinstance(val, bool):
+                return val
+            if val is None:
+                return False
+            s = str(val).strip().lower()
+            return s in ("1", "true", "yes", "y", "on")
+        grade = to_bool(req.params.get('grade'))
         if not question:
             try:
                 req_body = req.get_json()
@@ -686,6 +699,8 @@ def main(req: func.HttpRequest) -> func.HttpResponse:
                 pass
             else:
                 question = req_body.get('question')
+                if 'grade' in req_body:
+                    grade = to_bool(req_body.get('grade'))
 
         if not question:
             return func.HttpResponse(
@@ -701,7 +716,7 @@ def main(req: func.HttpRequest) -> func.HttpResponse:
         )
 
         # Execute the RAG pipeline
-        answer = chat(question, client, config)
+        answer = chat(question, client, config, grade=grade)
 
         # Return the response
         return func.HttpResponse(answer, mimetype="application/json", status_code=200)
