@@ -5,26 +5,56 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Legal RAG Assistant</title>
         <script src="js/marked.min.js"></script>
+        <script src="https://cdn.jsdelivr.net/npm/dompurify@3.0.9/dist/purify.min.js"></script>
     <style>
+        :root {
+            /* Color tokens */
+            --accent: #b10034;
+            --accent-600: #9a002e;
+            --accent-700: #8a0029;
+            --accent-800: #6e0021;
+            --bg: #f6f8fb;
+            --surface: #ffffff;
+            --surface-2: #f0f2f6;
+            --text: #1c2430;
+            --muted: #5a6678;
+            --ring: rgba(177, 0, 52, 0.45);
+            --success: #15803d;
+            --warning: #b45309;
+            --error: #b91c1c;
+
+            /* Radius, shadow, spacing, typography */
+            --radius-sm: 6px;
+            --radius-md: 10px;
+            --radius-lg: 14px;
+            --shadow-1: 0 2px 8px rgba(0,0,0,0.06);
+            --shadow-2: 0 6px 24px rgba(0,0,0,0.08);
+            --space-1: .5rem; --space-2: .75rem; --space-3: 1rem; --space-4: 1.25rem; --space-5: 1.75rem; --space-6: 2.25rem;
+            --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            --lh: 1.5;
+        }
+        @media (prefers-reduced-motion: reduce) {
+            * { animation-duration: 0.001ms !important; animation-iteration-count: 1 !important; transition-duration: 0.001ms !important; scroll-behavior: auto !important; }
+        }
         body {
-            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-            background-color: #f4f7f9;
-            color: #333;
+            font-family: var(--font-sans);
+            background-color: var(--bg);
+            color: var(--text);
             margin: 0;
-            padding: 2rem;
+            padding: clamp(1rem, 2vw, 2rem);
             display: flex;
             justify-content: center;
         }
         .container {
-            max-width: 800px;
+            max-width: 960px;
             width: 100%;
-            background: #fff;
-            padding: 2rem;
-            border-radius: 8px;
-            box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+            background: var(--surface);
+            padding: clamp(1rem, 2vw, 2rem);
+            border-radius: var(--radius-lg);
+            box-shadow: var(--shadow-2);
         }
         h1 {
-            color: #1a2b4d;
+            color: #0f172a;
             text-align: center;
             margin-bottom: 2rem;
         }
@@ -32,8 +62,8 @@
             width: 100%;
             padding: 1rem;
             font-size: 1rem;
-            border-radius: 4px;
-            border: 1px solid #dcdcdc;
+            border-radius: var(--radius-md);
+            border: 1px solid #e5e7eb;
             box-sizing: border-box;
             resize: vertical;
             min-height: 100px;
@@ -46,18 +76,22 @@
             font-size: 1rem;
             font-weight: bold;
             color: #fff;
-            background-color: #b10034;
+            background-color: var(--accent);
             border: none;
-            border-radius: 4px;
+            border-radius: var(--radius-md);
             cursor: pointer;
-            transition: background-color 0.2s;
+            transition: background-color 0.2s, box-shadow 0.15s;
         }
         button:disabled {
             background-color: #a0a0a0;
             cursor: not-allowed;
         }
         button:hover:not(:disabled) {
-            background-color: #8a0029; /* Darker shade for hover */
+            background-color: var(--accent-700);
+        }
+        button:focus-visible {
+            outline: none;
+            box-shadow: 0 0 0 3px var(--ring);
         }
         #response {
             margin-top: 2rem;
@@ -728,6 +762,28 @@
         }
         /* Hide debug output by default but keep in DOM */
         #response-area details { display: none; }
+
+        /* Utility: visually hidden for screen-reader announcements */
+        .sr-only { position: absolute !important; width: 1px !important; height: 1px !important; padding: 0 !important; margin: -1px !important; overflow: hidden !important; clip: rect(0, 0, 1px, 1px) !important; white-space: nowrap !important; border: 0 !important; }
+
+        /* Skeleton shimmer for answer area */
+        .skeleton { position: relative; background: linear-gradient(90deg, var(--surface-2), var(--surface), var(--surface-2)); background-size: 200% 100%; animation: shimmer 1.2s ease-in-out infinite; min-height: 160px; border-radius: var(--radius-md); }
+        @keyframes shimmer { 0% { background-position: -200% 0; } 100% { background-position: 200% 0; } }
+        @media (prefers-reduced-motion: reduce) { .skeleton { animation: none; } }
+
+        /* Answer actions */
+        .answer-header { display: flex; align-items: center; justify-content: space-between; gap: var(--space-2); }
+        .answer-actions { display: inline-flex; gap: var(--space-2); }
+        .btn-secondary { width: auto; padding: .5rem .75rem; margin-top: 0; font-weight: 600; background: #ffffff; color: var(--accent); border: 1px solid #e5e7eb; border-radius: var(--radius-sm); }
+        .btn-secondary:hover { background: #f9fafb; }
+        .btn-secondary:focus-visible { box-shadow: 0 0 0 3px var(--ring); }
+
+        /* Print: show only the answer content */
+        @media print {
+            body { background: #fff; }
+            .document-management-trigger, #query-progress, details, textarea, #askButton, h1, #country-header-container, hr { display: none !important; }
+            #refined-answer-container { color: #000; }
+        }
     </style>
 </head>
 <body>
@@ -735,6 +791,7 @@
         <h1>Legal RAG Assistant</h1>
         <textarea id="question" placeholder="Ask a question about knife legislation..."></textarea>
         <button id="askButton">Answer</button>
+        <div id="aria-live-status" class="sr-only" aria-live="polite"></div>
         
         <!-- Document Management Button -->
         <div class="document-management-trigger">
@@ -798,10 +855,10 @@
         
         <div id="response-area" class="hidden">
             <div id="query-progress" class="query-progress hidden">
-                <div class="query-progress-bar">
+                <div class="query-progress-bar" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" aria-label="Query progress" aria-describedby="query-status">
                     <div class="query-progress-fill"></div>
                 </div>
-                <div id="query-status" class="query-status-text">Preparing…</div>
+                <div id="query-status" class="query-status-text" aria-live="polite">Preparing…</div>
             </div>
             <details>
                 <summary>Show Full Debug Output</summary>
@@ -810,8 +867,14 @@
             </details>
             <hr>
             <div id="country-header-container"></div>
-            <h2>Answer</h2>
-            <div id="refined-answer-container"></div>
+            <div class="answer-header">
+                <h2>Answer</h2>
+                <div class="answer-actions">
+                    <button id="copyAnswerBtn" class="btn-secondary" type="button" aria-label="Copy answer">Copy</button>
+                    <button id="printAnswerBtn" class="btn-secondary" type="button" aria-label="Print answer">Print</button>
+                </div>
+            </div>
+            <div id="refined-answer-container" aria-live="polite"></div>
         </div>
     </div>
 
@@ -1123,14 +1186,20 @@
             const countryHeaderContainer = document.getElementById('country-header-container');
             const refinedAnswerContainer = document.getElementById('refined-answer-container');
             const queryProgress = document.getElementById('query-progress');
+            const progressBarEl = document.querySelector('#query-progress .query-progress-bar');
             const queryProgressFill = document.querySelector('#query-progress .query-progress-fill');
             const queryStatus = document.getElementById('query-status');
+            const ariaLive = document.getElementById('aria-live-status');
+            const copyAnswerBtn = document.getElementById('copyAnswerBtn');
+            const printAnswerBtn = document.getElementById('printAnswerBtn');
             let queryProgressTimers = [];
 
             function clearQueryProgressTimers() {
                 queryProgressTimers.forEach(id => clearTimeout(id));
                 queryProgressTimers = [];
             }
+
+            function announce(msg) { if (ariaLive) ariaLive.textContent = msg; }
 
             function startQueryProgress() {
                 if (queryProgress) {
@@ -1139,35 +1208,56 @@
                 if (queryProgressFill) {
                     queryProgressFill.style.width = '5%';
                 }
+                if (progressBarEl) progressBarEl.setAttribute('aria-valuenow', '5');
+                if (progressBarEl) progressBarEl.setAttribute('aria-valuetext', 'Identifying countries in user query…');
                 if (queryStatus) {
                     queryStatus.textContent = 'Identifying countries in user query…';
                 }
+                announce('Identifying countries in user query');
                 clearQueryProgressTimers();
+                // Show skeleton while loading
+                if (refinedAnswerContainer) refinedAnswerContainer.classList.add('skeleton');
                 // Gentle staged progression while waiting for the backend
                 queryProgressTimers.push(setTimeout(() => {
                     if (queryProgressFill) queryProgressFill.style.width = '35%';
+                    if (progressBarEl) progressBarEl.setAttribute('aria-valuenow', '35');
+                    if (progressBarEl) progressBarEl.setAttribute('aria-valuetext', 'Continuing…');
                 }, 800));
                 queryProgressTimers.push(setTimeout(() => {
                     if (queryProgressFill) queryProgressFill.style.width = '60%';
+                    if (progressBarEl) progressBarEl.setAttribute('aria-valuenow', '60');
                     if (queryStatus) queryStatus.textContent = 'Drafting answer…';
+                    if (progressBarEl) progressBarEl.setAttribute('aria-valuetext', 'Drafting answer…');
+                    announce('Drafting answer');
                 }, 3000));
                 queryProgressTimers.push(setTimeout(() => {
                     if (queryProgressFill) queryProgressFill.style.width = '85%';
+                    if (progressBarEl) progressBarEl.setAttribute('aria-valuenow', '85');
                     if (queryStatus) queryStatus.textContent = 'Refining answer…';
+                    if (progressBarEl) progressBarEl.setAttribute('aria-valuetext', 'Refining answer…');
+                    announce('Refining answer');
                 }, 12000));
                 queryProgressTimers.push(setTimeout(() => {
                     if (queryProgressFill) queryProgressFill.style.width = '95%';
+                    if (progressBarEl) progressBarEl.setAttribute('aria-valuenow', '95');
+                    if (progressBarEl) progressBarEl.setAttribute('aria-valuetext', 'Almost done…');
                 }, 20000));
             }
 
             function finishQueryProgress(success = true) {
                 clearQueryProgressTimers();
                 if (queryProgressFill) queryProgressFill.style.width = '100%';
+                if (progressBarEl) progressBarEl.setAttribute('aria-valuenow', '100');
+                if (progressBarEl) progressBarEl.setAttribute('aria-valuetext', success ? 'Answer ready' : 'An error occurred');
                 if (queryStatus) queryStatus.textContent = success ? 'Answer ready' : 'An error occurred';
+                announce(success ? 'Answer ready' : 'An error occurred');
                 setTimeout(() => {
                     if (queryProgress) queryProgress.classList.add('hidden');
                     if (queryProgressFill) queryProgressFill.style.width = '0%';
+                    if (progressBarEl) progressBarEl.setAttribute('aria-valuenow', '0');
+                    if (progressBarEl) progressBarEl.setAttribute('aria-valuetext', 'Idle');
                     if (queryStatus) queryStatus.textContent = '';
+                    if (refinedAnswerContainer) refinedAnswerContainer.classList.remove('skeleton');
                 }, success ? 1200 : 2000);
             }
         
@@ -1181,14 +1271,16 @@
 
                 // Disable button and show loading state
                 askButton.disabled = true;
+                askButton.setAttribute('aria-disabled', 'true');
                 askButton.textContent = 'Thinking...';
                 responseArea.classList.remove('hidden');
-            fullJsonResponseDiv.textContent = 'Please wait, fetching the answer...';
-            refinedAnswerContainer.innerHTML = '';
-            // Reset country detection display for new queries
-            countryHeaderContainer.innerHTML = '';
-            // Start progress UI
-            startQueryProgress();
+                responseArea.setAttribute('aria-busy', 'true');
+                fullJsonResponseDiv.textContent = 'Please wait, fetching the answer...';
+                refinedAnswerContainer.innerHTML = '';
+                // Reset country detection display for new queries
+                countryHeaderContainer.innerHTML = '';
+                // Start progress UI
+                startQueryProgress();
 
             try {
                 const response = await fetchWithRetry('/api/ask', {
@@ -1201,22 +1293,24 @@
 
                 if (response.ok) {
                     const data = await response.json(); // Parse the JSON response
-                    
                     console.log('DEBUG: API result:', data);
-
                     // Display the full raw JSON for debugging
                     fullJsonResponseDiv.textContent = JSON.stringify(data, null, 2);
-
-                    // Display the country header
+                    // Display the country header (sanitized)
                     if (data && data.country_header) {
-                        countryHeaderContainer.innerHTML = marked.parse(data.country_header);
+                        const countryHTML = DOMPurify.sanitize(marked.parse(data.country_header));
+                        countryHeaderContainer.innerHTML = countryHTML;
+                        // Secure outbound links
+                        countryHeaderContainer.querySelectorAll('a[href]').forEach(a => { a.setAttribute('target','_blank'); a.setAttribute('rel','noopener noreferrer'); });
                     } else {
-                        countryHeaderContainer.innerHTML = ''; // Clear it if not present
+                        countryHeaderContainer.innerHTML = '';
                     }
-
-                    // Render the refined answer markdown into its container
+                    // Render the refined answer markdown into its container (sanitized)
                     if (data && data.refined_answer) {
-                        refinedAnswerContainer.innerHTML = marked.parse(data.refined_answer);
+                        const answerHTML = DOMPurify.sanitize(marked.parse(data.refined_answer));
+                        refinedAnswerContainer.innerHTML = answerHTML;
+                        // Secure outbound links
+                        refinedAnswerContainer.querySelectorAll('a[href]').forEach(a => { a.setAttribute('target','_blank'); a.setAttribute('rel','noopener noreferrer'); });
                     } else {
                         refinedAnswerContainer.textContent = 'No valid answer found in the response.';
                     }
@@ -1241,9 +1335,35 @@
             } finally {
                 // Re-enable button
                 askButton.disabled = false;
+                askButton.removeAttribute('aria-disabled');
                 askButton.textContent = 'Answer';
+                responseArea.removeAttribute('aria-busy');
             }
         });
+
+        // Keyboard shortcut: Ctrl/Cmd + Enter to submit
+        questionInput.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
+                e.preventDefault();
+                askButton.click();
+            }
+        });
+
+        // Answer actions
+        if (copyAnswerBtn) {
+            copyAnswerBtn.addEventListener('click', async () => {
+                try {
+                    const text = refinedAnswerContainer ? refinedAnswerContainer.innerText : '';
+                    if (navigator.clipboard && text) {
+                        await navigator.clipboard.writeText(text);
+                        announce('Answer copied to clipboard');
+                    }
+                } catch (e) { console.warn('Copy failed', e); }
+            });
+        }
+        if (printAnswerBtn) {
+            printAnswerBtn.addEventListener('click', () => window.print());
+        }
         
         // Initialize document management modal event listeners after DOM is loaded
         const modal = document.getElementById('documentManagementModal');
