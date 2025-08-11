@@ -6,6 +6,7 @@
     <title>Legal RAG Assistant</title>
         <script src="js/marked.min.js"></script>
         <script src="https://cdn.jsdelivr.net/npm/dompurify@3.0.9/dist/purify.min.js"></script>
+        <script src="https://cdnjs.cloudflare.com/ajax/libs/diff_match_patch/20121119/diff_match_patch.min.js"></script>
     <style>
         :root {
             /* Color tokens */
@@ -793,6 +794,7 @@
 
         /* Inline improvement highlight */
         mark.improvement { background: #fff4c2; padding: 0 .15em; border-radius: .2em; box-shadow: inset 0 -1px 0 rgba(0,0,0,.05); }
+        del.removal { background: #ffe7e7; color: #8a1f1f; text-decoration: line-through; padding: 0 .1em; border-radius: .15em; }
 
         /* Grading overlay */
         .grading-overlay { position: fixed; inset: 0; background: rgba(15, 23, 42, 0.55); display: none; align-items: center; justify-content: center; z-index: 1000; }
@@ -1590,34 +1592,49 @@
         // Simple line-aware highlight: wrap lines present in refined but not in draft
         function markUpImprovements(refinedMd, draftMd, missingFacts = []) {
             try {
-                // 1) Sentence-level highlighting: sentences in refined not in draft
-                const sentSplit = (s) => s
-                    .replace(/\n+/g, ' ') // treat newlines as spaces for sentence compare
-                    .split(/(?<=[.!?])\s+/);
-                const draftSent = new Set(sentSplit(draftMd).map(x => x.trim()).filter(Boolean));
-                const wrapSentence = (s) => `<mark class="improvement">${s}</mark>`;
-                const refinedSentences = sentSplit(refinedMd);
-                let rebuilt = refinedSentences.map(s => {
-                    const t = s.trim();
-                    if (!t) return s;
-                    // Treat bullet-introduced sentences as-is
-                    const isBullet = /^[-*]\s/.test(t);
-                    if (!draftSent.has(t) || isBullet && ![...draftSent].some(ds => ds.includes(t))) {
-                        return wrapSentence(s);
+                // Helper: build regex patterns for missing facts, flexible whitespace
+                const buildPatterns = (facts) => {
+                    const patterns = [];
+                    (facts || []).forEach(f => {
+                        const frag = String(f || '').trim();
+                        if (!frag) return;
+                        const escaped = frag.replace(/[.*+?^${}()|[\]\\]/g, '\\$&').replace(/\s+/g, '\\s+');
+                        try { patterns.push(new RegExp(escaped.slice(0, 400), 'gi')); } catch(_) { /* ignore */ }
+                    });
+                    return patterns;
+                };
+
+                const patterns = buildPatterns(missingFacts);
+                const highlightMissing = (text) => {
+                    let out = text;
+                    for (const rx of patterns) {
+                        out = out.replace(rx, (m) => `<mark class="improvement">${m}</mark>`);
                     }
-                    return s;
-                }).join(' ');
-                // 2) Emphasize missing facts phrases when present
-                const escapeReg = (str) => str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-                (missingFacts || []).forEach(f => {
-                    const frag = String(f || '').trim();
-                    if (!frag) return;
-                    try {
-                        const rx = new RegExp(escapeReg(frag).slice(0, 200), 'gi'); // guard overly long patterns
-                        rebuilt = rebuilt.replace(rx, (m) => `<mark class="improvement">${m}</mark>`);
-                    } catch (_) { /* ignore bad regex */ }
-                });
-                return rebuilt;
+                    return out;
+                };
+
+                // Prefer diff-match-patch if available to show deletions inline
+                if (typeof diff_match_patch !== 'undefined') {
+                    const dmp = new diff_match_patch();
+                    dmp.Diff_Timeout = 0.5;
+                    const diffs = dmp.diff_main(draftMd, refinedMd);
+                    dmp.diff_cleanupSemantic(diffs);
+                    let rebuilt = '';
+                    for (const [op, data] of diffs) {
+                        if (op === 0) { // equal
+                            rebuilt += data;
+                        } else if (op === 1) { // insert in refined
+                            rebuilt += highlightMissing(data);
+                        } else if (op === -1) { // deleted from draft
+                            // Show deletions struck-through
+                            rebuilt += `<del class="removal">${data}</del>`;
+                        }
+                    }
+                    return rebuilt;
+                }
+
+                // Fallback: no diff library, only missing-fact highlights in refined
+                return highlightMissing(refinedMd);
             } catch (e) { console.warn('markUpImprovements failed', e); return refinedMd; }
         }
         function buildGradingOverlay(data) {
