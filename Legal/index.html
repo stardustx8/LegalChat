@@ -790,7 +790,7 @@
     <div class="container">
         <h1>Legal RAG Assistant</h1>
         <textarea id="question" placeholder="Ask a question about knife legislation..."></textarea>
-        <button id="askButton">Answer</button>
+        <button id="askButton">Ask!</button>
         <div id="aria-live-status" class="sr-only" aria-live="polite"></div>
         
         <!-- Document Management Button -->
@@ -1191,6 +1191,7 @@
             const copyAnswerBtn = document.getElementById('copyAnswerBtn');
             const printAnswerBtn = document.getElementById('printAnswerBtn');
             let queryProgressTimers = [];
+            let queryProgressDismissHandler = null;
 
             function clearQueryProgressTimers() {
                 queryProgressTimers.forEach(id => clearTimeout(id));
@@ -1200,6 +1201,11 @@
             function announce(msg) { if (ariaLive) ariaLive.textContent = msg; }
 
             function startQueryProgress() {
+                // Clear any pending dismiss handler from previous query
+                if (queryProgressDismissHandler) {
+                    document.removeEventListener('click', queryProgressDismissHandler);
+                    queryProgressDismissHandler = null;
+                }
                 if (queryProgress) {
                     queryProgress.classList.remove('hidden');
                 }
@@ -1217,45 +1223,46 @@
                 if (refinedAnswerContainer) refinedAnswerContainer.classList.add('skeleton');
                 // Gentle staged progression while waiting for the backend
                 queryProgressTimers.push(setTimeout(() => {
-                    if (queryProgressFill) queryProgressFill.style.width = '35%';
-                    if (progressBarEl) progressBarEl.setAttribute('aria-valuenow', '35');
+                    if (queryProgressFill) queryProgressFill.style.width = '30%';
+                    if (progressBarEl) progressBarEl.setAttribute('aria-valuenow', '30');
                     if (progressBarEl) progressBarEl.setAttribute('aria-valuetext', 'Continuing…');
-                }, 800));
+                }, 1000));
                 queryProgressTimers.push(setTimeout(() => {
-                    if (queryProgressFill) queryProgressFill.style.width = '60%';
-                    if (progressBarEl) progressBarEl.setAttribute('aria-valuenow', '60');
+                    if (queryProgressFill) queryProgressFill.style.width = '55%';
+                    if (progressBarEl) progressBarEl.setAttribute('aria-valuenow', '55');
                     if (queryStatus) queryStatus.textContent = 'Drafting answer…';
                     if (progressBarEl) progressBarEl.setAttribute('aria-valuetext', 'Drafting answer…');
                     announce('Drafting answer');
                 }, 3000));
-                // Start refining phase with gradual climb to keep user engaged
+                // Start refining phase with slower, steady climb to ~95% over ~20–30s
                 queryProgressTimers.push(setTimeout(() => {
                     if (progressBarEl) progressBarEl.setAttribute('aria-valuetext', 'Refining answer…');
                     if (queryStatus) queryStatus.textContent = 'Refining answer…';
                     announce('Refining answer');
-                    // Gradually climb towards 95%
-                    let current = 75; // ensure noticeable jump into refining
+                    let current = 70; // enter refining noticeably
                     const target = 95;
                     if (queryProgressFill) queryProgressFill.style.width = current + '%';
                     if (progressBarEl) progressBarEl.setAttribute('aria-valuenow', String(current));
                     const step = () => {
                         // Stop if finish moved it to 100%
                         const nowWidth = parseInt((queryProgressFill?.style.width || '0').replace('%','')) || current;
-                        if (nowWidth >= target) return;
-                        const inc = Math.max(1, Math.min(3, target - nowWidth));
-                        const next = Math.min(target, nowWidth + inc);
+                        if (nowWidth >= target) {
+                            // Hold near-complete state until finish
+                            if (progressBarEl) progressBarEl.setAttribute('aria-valuetext', 'Almost done…');
+                            if (queryStatus) queryStatus.textContent = 'Almost done…';
+                            return;
+                        }
+                        const next = Math.min(target, nowWidth + 1);
                         if (queryProgressFill) queryProgressFill.style.width = next + '%';
                         if (progressBarEl) progressBarEl.setAttribute('aria-valuenow', String(next));
-                        queryProgressTimers.push(setTimeout(step, 800));
+                        if (next >= 90) {
+                            if (progressBarEl) progressBarEl.setAttribute('aria-valuetext', 'Almost done…');
+                            if (queryStatus) queryStatus.textContent = 'Almost done…';
+                        }
+                        queryProgressTimers.push(setTimeout(step, 1000));
                     };
-                    queryProgressTimers.push(setTimeout(step, 900));
-                }, 12000));
-                // Keep near completion without jumping to 100% until finish
-                queryProgressTimers.push(setTimeout(() => {
-                    if (queryProgressFill) queryProgressFill.style.width = '95%';
-                    if (progressBarEl) progressBarEl.setAttribute('aria-valuenow', '95');
-                    if (progressBarEl) progressBarEl.setAttribute('aria-valuetext', 'Almost done…');
-                }, 20000));
+                    queryProgressTimers.push(setTimeout(step, 1000));
+                }, 6000));
             }
 
             function finishQueryProgress(success = true, finalDetail = '') {
@@ -1263,23 +1270,26 @@
                 if (queryProgressFill) queryProgressFill.style.width = '100%';
                 if (progressBarEl) progressBarEl.setAttribute('aria-valuenow', '100');
                 const doneText = success ? (finalDetail ? `Answer ready — ${finalDetail}` : 'Answer ready') : 'An error occurred';
-                if (progressBarEl) progressBarEl.setAttribute('aria-valuetext', doneText);
-                if (queryStatus) queryStatus.textContent = doneText;
+                const dismissHint = ' Click anywhere to dismiss.';
+                const finalDisplay = doneText + dismissHint;
+                if (progressBarEl) progressBarEl.setAttribute('aria-valuetext', finalDisplay);
+                if (queryStatus) queryStatus.textContent = finalDisplay;
                 announce(doneText);
-                // Keep the progress bar visible on success to show final country info.
-                // Only hide on explicit error.
-                if (!success) {
-                    setTimeout(() => {
-                        if (queryProgress) queryProgress.classList.add('hidden');
-                        if (queryProgressFill) queryProgressFill.style.width = '0%';
-                        if (progressBarEl) progressBarEl.setAttribute('aria-valuenow', '0');
-                        if (progressBarEl) progressBarEl.setAttribute('aria-valuetext', 'Idle');
-                        if (queryStatus) queryStatus.textContent = '';
-                        if (refinedAnswerContainer) refinedAnswerContainer.classList.remove('skeleton');
-                    }, 2000);
-                } else {
-                    if (refinedAnswerContainer) refinedAnswerContainer.classList.remove('skeleton');
+                // Keep visible until user clicks anywhere, then hide and cleanup
+                if (queryProgressDismissHandler) {
+                    document.removeEventListener('click', queryProgressDismissHandler);
                 }
+                queryProgressDismissHandler = () => {
+                    if (queryProgress) queryProgress.classList.add('hidden');
+                    if (queryProgressFill) queryProgressFill.style.width = '0%';
+                    if (progressBarEl) progressBarEl.setAttribute('aria-valuenow', '0');
+                    if (progressBarEl) progressBarEl.setAttribute('aria-valuetext', 'Idle');
+                    if (queryStatus) queryStatus.textContent = '';
+                    if (refinedAnswerContainer) refinedAnswerContainer.classList.remove('skeleton');
+                    document.removeEventListener('click', queryProgressDismissHandler);
+                    queryProgressDismissHandler = null;
+                };
+                document.addEventListener('click', queryProgressDismissHandler);
             }
         
             console.log('DEBUG: Setting up askButton event listener');
@@ -1354,7 +1364,7 @@
                 // Re-enable button
                 askButton.disabled = false;
                 askButton.removeAttribute('aria-disabled');
-                askButton.textContent = 'Answer';
+                askButton.textContent = 'Ask!';
                 responseArea.removeAttribute('aria-busy');
             }
         });
