@@ -1,6 +1,6 @@
 # LegalChat — Legal RAG Assistant
 
-This folder contains the production Static Web App (SWA) frontend for LegalChat, including the API function `Legal/api/ask` that serves the RAG pipeline.
+This repository contains the LegalChat system. The production Static Web App (SWA) frontend lives under `Legal/`, including the API function `Legal/api/ask` that serves the RAG pipeline.
 
 The system provides:
 
