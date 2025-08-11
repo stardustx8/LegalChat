@@ -441,7 +441,12 @@ def chat(question: str, client: AzureOpenAI, config: dict) -> str:
             logging.info("DEBUG: No ISO codes found, returning error message")
             return json.dumps({
                 "country_header": "",
-                "refined_answer": "Could not determine a country from your query. Please be more specific."
+                "refined_answer": "Could not determine a country from your query. Please be more specific.",
+                "country_detection": {
+                    "iso_codes": [],
+                    "available": [],
+                    "summary": ""
+                }
             }, indent=2)
 
         logging.info("DEBUG: Step 2 - Retrieving documents")
@@ -470,11 +475,19 @@ def chat(question: str, client: AzureOpenAI, config: dict) -> str:
             # Even if no docs are found, we can still show the header with availability status
             found_iso_codes = set()
             header = build_response_header(iso_codes, found_iso_codes)
+            # Build country_detection summary from iso_codes and availability
+            summary_list = [f"{code} {'✅' if code in found_iso_codes else '❌'}" for code in sorted(iso_codes)]
+            country_detection = {
+                "iso_codes": iso_codes,
+                "available": sorted(list(found_iso_codes)),
+                "summary": ", ".join(summary_list)
+            }
             no_docs_message = f"No documents found for the specified countries: {', '.join(iso_codes)}. Please try another query or check if the relevant legislation is available."
             logging.info("DEBUG: Returning no-docs message")
             return json.dumps({
                 "country_header": header,
-                "refined_answer": no_docs_message
+                "refined_answer": no_docs_message,
+                "country_detection": country_detection
             }, indent=2)
 
         logging.info("DEBUG: Step 3 - Preparing context for single-pass answer generation")
@@ -493,7 +506,14 @@ def chat(question: str, client: AzureOpenAI, config: dict) -> str:
         # Build the dynamic markdown table header for UI (not passed to the model)
         found_iso_codes = {chunk['iso_code'] for chunk in chunks}
         header = build_response_header(iso_codes, found_iso_codes)
-        logging.info("DEBUG: Header built for UI")
+        # Build country_detection summary for the frontend
+        summary_list = [f"{code} {'✅' if code in found_iso_codes else '❌'}" for code in sorted(iso_codes)]
+        country_detection = {
+            "iso_codes": iso_codes,
+            "available": sorted(list(found_iso_codes)),
+            "summary": ", ".join(summary_list)
+        }
+        logging.info("DEBUG: Header and country_detection built for UI")
 
         # Step 4: Generate a draft answer first (align with grader/refiner expectations)
         logging.info("DEBUG: Step 4 - Generating draft answer...")
@@ -608,7 +628,8 @@ def chat(question: str, client: AzureOpenAI, config: dict) -> str:
         logging.info("DEBUG: Step 8 - Building final systematic evaluation response")
         final_response = {
             "country_header": header,
-            "refined_answer": answer
+            "refined_answer": answer,
+            "country_detection": country_detection
         }
         
         total_ms = int((time.monotonic() - t_total_start) * 1000)

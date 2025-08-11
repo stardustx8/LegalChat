@@ -1198,6 +1198,9 @@
             const printAnswerBtn = document.getElementById('printAnswerBtn');
             let queryProgressTimers = [];
             let queryProgressDismissHandler = null;
+            // Cache detected countries summaries so they persist to completion
+            let lastDetectedSummaryRaw = '';
+            let lastDetectedSummaryText = '';
 
             function clearQueryProgressTimers() {
                 queryProgressTimers.forEach(id => clearTimeout(id));
@@ -1219,6 +1222,20 @@
                 } catch (e) { console.warn('normalizeAnswerHeading failed', e); }
             }
 
+            // Parse backend-provided country_header markdown table to a concise summary string
+            function parseCountryHeaderSummary(md) {
+                if (!md || typeof md !== 'string') return '';
+                const lines = md.split('\n');
+                const parts = [];
+                for (const line of lines) {
+                    // Match table rows like: | 🇨🇭 (CH) | ✅ |
+                    const m = line.match(/^\|\s*.*\(([A-Z]{2})\)\s*\|\s*(✅|❌)\s*\|/);
+                    if (m) parts.push(`${m[1]} ${m[2]}`);
+                }
+                if (!parts.length) return '';
+                return `Detected countries: ${parts.join(', ')}`;
+            }
+
             // Status pill removed; progress bar remains visible at completion
 
             function startQueryProgress() {
@@ -1229,6 +1246,9 @@
                 }
                 // Ensure progress UI is visible for a fresh run
                 if (queryProgress) queryProgress.classList.remove('hidden');
+                // Reset cached detected countries summaries
+                lastDetectedSummaryRaw = '';
+                lastDetectedSummaryText = '';
                 if (queryProgress) {
                     queryProgress.classList.remove('hidden');
                 }
@@ -1295,7 +1315,8 @@
                 if (queryProgressFill) queryProgressFill.style.width = '100%';
                 if (progressBarEl) progressBarEl.setAttribute('aria-valuenow', '100');
                 const doneText = success ? 'Answer ready' : 'An error occurred';
-                const finalText = finalDetail || doneText;
+                const effectiveDetail = finalDetail || lastDetectedSummaryRaw || lastDetectedSummaryText;
+                const finalText = effectiveDetail || doneText;
                 if (progressBarEl) progressBarEl.setAttribute('aria-valuetext', finalText);
                 if (queryStatus) queryStatus.textContent = finalText;
                 // Keep the progress bar visible with final detected countries text
@@ -1351,14 +1372,23 @@
                     }
                     // Show detected countries as soon as we have them, then finalize
                     const summary = (data && data.country_detection && data.country_detection.summary) ? data.country_detection.summary : '';
-                    if (summary) {
-                        const detectText = `Detected countries: ${summary.replaceAll('✅','').replaceAll('❌','')}`;
-                        if (progressBarEl) progressBarEl.setAttribute('aria-valuetext', detectText);
-                        if (queryStatus) queryStatus.textContent = detectText;
-                        announce(detectText);
+                    let headerSummary = parseCountryHeaderSummary(data && data.country_header);
+                    if (summary || headerSummary) {
+                        // Prefer JSON summary when available; otherwise use parsed header
+                        const raw = summary ? `Detected countries: ${summary}` : headerSummary;
+                        const textOnly = raw.replaceAll('✅','').replaceAll('❌','');
+                        // Cache both variants
+                        lastDetectedSummaryRaw = raw;
+                        lastDetectedSummaryText = textOnly;
+                        if (progressBarEl) progressBarEl.setAttribute('aria-valuetext', textOnly);
+                        if (queryStatus) queryStatus.textContent = textOnly;
+                        announce(textOnly);
                     }
                     // Finish progress on success with availability shown
-                    const finalDetail = (data && data.country_detection && data.country_detection.summary) ? `Detected countries: ${data.country_detection.summary}` : '';
+                    const headerFallback = parseCountryHeaderSummary(data && data.country_header);
+                    const finalDetail = (data && data.country_detection && data.country_detection.summary)
+                        ? `Detected countries: ${data.country_detection.summary}`
+                        : (headerFallback || lastDetectedSummaryRaw || lastDetectedSummaryText || '');
                     finishQueryProgress(true, finalDetail);
                 } else {
                     const errorText = await response.text();
