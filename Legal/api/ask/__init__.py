@@ -439,7 +439,10 @@ def chat(question: str, client: AzureOpenAI, config: dict) -> str:
         
         if not iso_codes:
             logging.info("DEBUG: No ISO codes found, returning error message")
-            return "Could not determine a country from your query. Please be more specific."
+            return json.dumps({
+                "country_header": "",
+                "refined_answer": "Could not determine a country from your query. Please be more specific."
+            }, indent=2)
 
         logging.info("DEBUG: Step 2 - Retrieving documents")
         # Dynamic k strategy based on query complexity and country count
@@ -469,7 +472,10 @@ def chat(question: str, client: AzureOpenAI, config: dict) -> str:
             header = build_response_header(iso_codes, found_iso_codes)
             no_docs_message = f"No documents found for the specified countries: {', '.join(iso_codes)}. Please try another query or check if the relevant legislation is available."
             logging.info("DEBUG: Returning no-docs message")
-            return header + no_docs_message
+            return json.dumps({
+                "country_header": header,
+                "refined_answer": no_docs_message
+            }, indent=2)
 
         logging.info("DEBUG: Step 3 - Preparing context for single-pass answer generation")
         # Build structured context with source mapping

@@ -106,6 +106,7 @@
         .document-management-trigger {
             margin-top: 20px;
             text-align: center;
+            display: none; /* Hidden by default, kept in DOM */
         }
         
         .doc-mgmt-btn {
@@ -703,6 +704,30 @@
             background: #f8d7da;
             color: #721c24;
         }
+        
+        /* Query Progress (Ask flow) */
+        .query-progress { margin-top: 1rem; }
+        .query-progress-bar {
+            width: 100%;
+            height: 8px;
+            background: #e9ecef;
+            border-radius: 4px;
+            overflow: hidden;
+        }
+        .query-progress-fill {
+            height: 100%;
+            width: 0%;
+            background: #b10034; /* Brand color */
+            transition: width 0.4s ease;
+        }
+        .query-status-text {
+            margin-top: 8px;
+            color: #b10034;
+            text-align: center;
+            font-weight: 500;
+        }
+        /* Hide debug output by default but keep in DOM */
+        #response-area details { display: none; }
     </style>
 </head>
 <body>
@@ -772,6 +797,12 @@
         </div>
         
         <div id="response-area" class="hidden">
+            <div id="query-progress" class="query-progress hidden">
+                <div class="query-progress-bar">
+                    <div class="query-progress-fill"></div>
+                </div>
+                <div id="query-status" class="query-status-text">Preparing…</div>
+            </div>
             <details>
                 <summary>Show Full Debug Output</summary>
                 <h2>Full JSON Response</h2>
@@ -1091,6 +1122,54 @@
             const fullJsonResponseDiv = document.getElementById('full-json-response');
             const countryHeaderContainer = document.getElementById('country-header-container');
             const refinedAnswerContainer = document.getElementById('refined-answer-container');
+            const queryProgress = document.getElementById('query-progress');
+            const queryProgressFill = document.querySelector('#query-progress .query-progress-fill');
+            const queryStatus = document.getElementById('query-status');
+            let queryProgressTimers = [];
+
+            function clearQueryProgressTimers() {
+                queryProgressTimers.forEach(id => clearTimeout(id));
+                queryProgressTimers = [];
+            }
+
+            function startQueryProgress() {
+                if (queryProgress) {
+                    queryProgress.classList.remove('hidden');
+                }
+                if (queryProgressFill) {
+                    queryProgressFill.style.width = '5%';
+                }
+                if (queryStatus) {
+                    queryStatus.textContent = 'Identifying countries in user query…';
+                }
+                clearQueryProgressTimers();
+                // Gentle staged progression while waiting for the backend
+                queryProgressTimers.push(setTimeout(() => {
+                    if (queryProgressFill) queryProgressFill.style.width = '35%';
+                }, 800));
+                queryProgressTimers.push(setTimeout(() => {
+                    if (queryProgressFill) queryProgressFill.style.width = '60%';
+                    if (queryStatus) queryStatus.textContent = 'Drafting answer…';
+                }, 3000));
+                queryProgressTimers.push(setTimeout(() => {
+                    if (queryProgressFill) queryProgressFill.style.width = '85%';
+                    if (queryStatus) queryStatus.textContent = 'Refining answer…';
+                }, 12000));
+                queryProgressTimers.push(setTimeout(() => {
+                    if (queryProgressFill) queryProgressFill.style.width = '95%';
+                }, 20000));
+            }
+
+            function finishQueryProgress(success = true) {
+                clearQueryProgressTimers();
+                if (queryProgressFill) queryProgressFill.style.width = '100%';
+                if (queryStatus) queryStatus.textContent = success ? 'Answer ready' : 'An error occurred';
+                setTimeout(() => {
+                    if (queryProgress) queryProgress.classList.add('hidden');
+                    if (queryProgressFill) queryProgressFill.style.width = '0%';
+                    if (queryStatus) queryStatus.textContent = '';
+                }, success ? 1200 : 2000);
+            }
         
             console.log('DEBUG: Setting up askButton event listener');
             askButton.addEventListener('click', async () => {
@@ -1106,6 +1185,10 @@
                 responseArea.classList.remove('hidden');
             fullJsonResponseDiv.textContent = 'Please wait, fetching the answer...';
             refinedAnswerContainer.innerHTML = '';
+            // Reset country detection display for new queries
+            countryHeaderContainer.innerHTML = '';
+            // Start progress UI
+            startQueryProgress();
 
             try {
                 const response = await fetchWithRetry('/api/ask', {
@@ -1137,18 +1220,24 @@
                     } else {
                         refinedAnswerContainer.textContent = 'No valid answer found in the response.';
                     }
+                    // Finish progress on success
+                    finishQueryProgress(true);
                 } else {
                     const errorText = await response.text();
                     console.error('ERROR: HTTP response not OK:', response.status);
                     console.error('ERROR: Response text:', errorText);
                     fullJsonResponseDiv.textContent = `An error occurred: ${errorText}`;
                     refinedAnswerContainer.innerHTML = ''; // Clear the refined answer area
+                    // Finish progress on error
+                    finishQueryProgress(false);
                 }
             } catch (error) {
                 console.error('ERROR: Exception in askButton event listener:', error);
                 fullJsonResponseDiv.textContent = 'Failed to fetch the answer. Please check your connection and try again.';
                 countryHeaderContainer.innerHTML = '';
                 refinedAnswerContainer.innerHTML = '';
+                // Finish progress on exception
+                finishQueryProgress(false);
             } finally {
                 // Re-enable button
                 askButton.disabled = false;
