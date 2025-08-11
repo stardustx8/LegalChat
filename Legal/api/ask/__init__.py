@@ -629,7 +629,11 @@ def chat(question: str, client: AzureOpenAI, config: dict) -> str:
         final_response = {
             "country_header": header,
             "refined_answer": answer,
-            "country_detection": country_detection
+            "country_detection": country_detection,
+            # Expose evaluation block (may be empty if model returned plain text)
+            "evaluation": refined_data.get('evaluation', {}),
+            # Provide the draft so the UI can highlight refinements vs. the initial draft
+            "draft_answer": draft_answer
         }
         
         total_ms = int((time.monotonic() - t_total_start) * 1000)

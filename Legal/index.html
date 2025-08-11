@@ -790,6 +790,30 @@
             .document-management-trigger, #query-progress, details, textarea, #askButton, h1, #country-header-container, hr { display: none !important; }
             #refined-answer-container { color: #000; }
         }
+
+        /* Inline improvement highlight */
+        mark.improvement { background: #fff4c2; padding: 0 .15em; border-radius: .2em; box-shadow: inset 0 -1px 0 rgba(0,0,0,.05); }
+
+        /* Grading overlay */
+        .grading-overlay { position: fixed; inset: 0; background: rgba(15, 23, 42, 0.55); display: none; align-items: center; justify-content: center; z-index: 1000; }
+        .grading-overlay.show { display: flex; }
+        .grading-card { width: min(920px, 92vw); max-height: 86vh; overflow: auto; background: #fff; border-radius: 12px; box-shadow: 0 20px 40px rgba(2,6,23,.35); padding: 20px 24px; }
+        .grading-card h3 { margin: 0 0 10px 0; font-size: 1.25rem; color: #0f172a; }
+        .grading-card .subtitle { color: #475569; font-size: .95rem; margin-bottom: 12px; }
+        .grading-close { position: absolute; margin: 0; top: 16px; right: 16px; background: #fff; border: 1px solid #e2e8f0; border-radius: 8px; width: 36px; height: 36px; cursor: pointer; }
+        .grading-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+        @media (max-width: 800px) { .grading-grid { grid-template-columns: 1fr; } }
+        .metric { background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 10px; padding: 12px; }
+        .metric h4 { margin: 0 0 6px 0; font-size: 1rem; color: #0f172a; }
+        .metric .value { font-weight: 700; font-size: 1.1rem; color: #0f172a; }
+        .badge { display: inline-block; padding: 2px 8px; border-radius: 999px; font-size: .85rem; margin-right: 6px; margin-bottom: 6px; border: 1px solid #e2e8f0; }
+        .badge.ok { background: #ecfdf5; color: #065f46; border-color: #a7f3d0; }
+        .badge.missing { background: #fef2f2; color: #991b1b; border-color: #fecaca; }
+        .list { margin: 8px 0 0 0; padding-left: 18px; }
+        .list li { margin: 4px 0; }
+        .grading-actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 8px; }
+        /* Screen-reader only utility */
+        .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0,0,0,0); white-space: nowrap; border: 0; }
     </style>
 </head>
 <body>
@@ -874,11 +898,47 @@
             <div class="answer-header">
                 <h2>Answer</h2>
                 <div class="answer-actions">
+                    <button id="gradeBtn" class="btn-secondary" type="button" aria-label="Grade & Revise">Grade & Revise</button>
                     <button id="copyAnswerBtn" class="btn-secondary" type="button" aria-label="Copy answer">Copy</button>
                     <button id="printAnswerBtn" class="btn-secondary" type="button" aria-label="Print answer">Print</button>
                 </div>
             </div>
             <div id="refined-answer-container" aria-live="polite"></div>
+        </div>
+
+        <!-- Grading overlay -->
+        <div id="grading-overlay" class="grading-overlay" role="dialog" aria-modal="true" aria-labelledby="grading-title">
+            <div class="grading-card">
+                <button id="gradingCloseBtn" class="grading-close" aria-label="Close grading">✕</button>
+                <h3 id="grading-title">Answer Grading</h3>
+                <div class="subtitle">Automated evaluation against provided sources (RAG-only)</div>
+                <div class="grading-grid">
+                    <div class="metric" id="metric-overall">
+                        <h4>Overall</h4>
+                        <div class="value" id="metric-f1">F1: –</div>
+                        <div id="metric-precision">Precision: –</div>
+                        <div id="metric-recall">Recall: –</div>
+                    </div>
+                    <div class="metric" id="metric-juris">
+                        <h4>Jurisdictions</h4>
+                        <div id="juris-covered"></div>
+                        <div id="juris-missing"></div>
+                    </div>
+                </div>
+                <div class="grading-grid" style="margin-top:12px;">
+                    <div class="metric">
+                        <h4>Missing Facts</h4>
+                        <ul class="list" id="list-missing"></ul>
+                    </div>
+                    <div class="metric">
+                        <h4>Unsupported Claims</h4>
+                        <ul class="list" id="list-unsupported"></ul>
+                    </div>
+                </div>
+                <div class="grading-actions">
+                    <button id="toggleHighlightsBtn" class="btn-secondary" type="button" aria-pressed="true">Hide Highlights</button>
+                </div>
+            </div>
         </div>
     </div>
 
@@ -1196,11 +1256,14 @@
             const ariaLive = document.getElementById('aria-live-status');
             const copyAnswerBtn = document.getElementById('copyAnswerBtn');
             const printAnswerBtn = document.getElementById('printAnswerBtn');
+            const gradeBtn = document.getElementById('gradeBtn');
             let queryProgressTimers = [];
             let queryProgressDismissHandler = null;
             // Cache detected countries summaries so they persist to completion
             let lastDetectedSummaryRaw = '';
             let lastDetectedSummaryText = '';
+            // Store last payload to reopen overlay on demand
+            let lastResult = null;
 
             function clearQueryProgressTimers() {
                 queryProgressTimers.forEach(id => clearTimeout(id));
@@ -1279,9 +1342,9 @@
                 }, 3000));
                 // Start refining phase with slower, steady climb to ~95% over ~20–30s
                 queryProgressTimers.push(setTimeout(() => {
-                    if (progressBarEl) progressBarEl.setAttribute('aria-valuetext', 'Refining answer…');
-                    if (queryStatus) queryStatus.textContent = 'Refining answer…';
-                    announce('Refining answer');
+                    if (progressBarEl) progressBarEl.setAttribute('aria-valuetext', 'Refining & grading answer…');
+                    if (queryStatus) queryStatus.textContent = 'Refining & grading answer…';
+                    announce('Refining and grading answer');
                     let current = 70; // enter refining noticeably
                     const target = 95;
                     if (queryProgressFill) queryProgressFill.style.width = current + '%';
@@ -1359,13 +1422,38 @@
                     fullJsonResponseDiv.textContent = JSON.stringify(data, null, 2);
                     // Render the refined answer markdown into its container (sanitized)
                     if (data && data.refined_answer) {
-                        const answerHTML = DOMPurify.sanitize(marked.parse(data.refined_answer));
-                        refinedAnswerContainer.innerHTML = answerHTML;
+                        // Prepare highlighted vs. plain answer HTML so we can toggle
+                        let lastAnswerPlainHTML = '';
+                        let lastAnswerHighlightedHTML = '';
+                        const refinedMd = String(data.refined_answer || '');
+                        const draftMd = String(data.draft_answer || '');
+                        if (draftMd) {
+                            const highlightedMd = markUpImprovements(refinedMd, draftMd);
+                            lastAnswerHighlightedHTML = DOMPurify.sanitize(marked.parse(highlightedMd));
+                        }
+                        lastAnswerPlainHTML = DOMPurify.sanitize(marked.parse(refinedMd));
+                        // Default to highlighted when available
+                        refinedAnswerContainer.innerHTML = lastAnswerHighlightedHTML || lastAnswerPlainHTML;
                         if (refinedAnswerContainer) refinedAnswerContainer.classList.remove('skeleton');
                         // Secure outbound links
                         refinedAnswerContainer.querySelectorAll('a[href]').forEach(a => { a.setAttribute('target','_blank'); a.setAttribute('rel','noopener noreferrer'); });
                         // Demote leading 'Summary' H2 to H3 for clearer hierarchy under 'Answer'
                         normalizeAnswerHeading();
+                        // Wire up toggle button
+                        const toggleBtn = document.getElementById('toggleHighlightsBtn');
+                        if (toggleBtn) {
+                            let showingHighlights = !!lastAnswerHighlightedHTML;
+                            toggleBtn.setAttribute('aria-pressed', String(showingHighlights));
+                            toggleBtn.textContent = showingHighlights ? 'Hide Highlights' : 'Show Highlights';
+                            toggleBtn.onclick = () => {
+                                showingHighlights = !showingHighlights;
+                                toggleBtn.setAttribute('aria-pressed', String(showingHighlights));
+                                toggleBtn.textContent = showingHighlights ? 'Hide Highlights' : 'Show Highlights';
+                                refinedAnswerContainer.innerHTML = showingHighlights && lastAnswerHighlightedHTML ? lastAnswerHighlightedHTML : lastAnswerPlainHTML;
+                                normalizeAnswerHeading();
+                                refinedAnswerContainer.querySelectorAll('a[href]').forEach(a => { a.setAttribute('target','_blank'); a.setAttribute('rel','noopener noreferrer'); });
+                            };
+                        }
                     } else {
                         refinedAnswerContainer.textContent = 'No valid answer found in the response.';
                         if (refinedAnswerContainer) refinedAnswerContainer.classList.remove('skeleton');
@@ -1390,6 +1478,9 @@
                         ? `Detected countries: ${data.country_detection.summary}`
                         : (headerFallback || lastDetectedSummaryRaw || lastDetectedSummaryText || '');
                     finishQueryProgress(true, finalDetail);
+                    // Cache for later and show grading overlay if evaluation present
+                    lastResult = data;
+                    try { if (data && data.evaluation) { buildGradingOverlay(data); showGradingOverlay(); } } catch (e) { console.warn('Grading overlay failed', e); }
                 } else {
                     const errorText = await response.text();
                     console.error('ERROR: HTTP response not OK:', response.status);
@@ -1437,6 +1528,81 @@
         if (printAnswerBtn) {
             printAnswerBtn.addEventListener('click', () => window.print());
         }
+        if (gradeBtn) {
+            gradeBtn.addEventListener('click', () => {
+                if (lastResult && lastResult.evaluation) {
+                    try { buildGradingOverlay(lastResult); showGradingOverlay(); } catch (e) { console.warn('Grading overlay failed', e); }
+                } else {
+                    alert('No grading available yet. Ask a question first.');
+                }
+            });
+        }
+
+        // --- Grading helpers ---
+        function percent(num) {
+            if (typeof num !== 'number') return '–';
+            const p = Math.round(num * 100);
+            return isFinite(p) ? `${p}%` : '–';
+        }
+        // Simple line-aware highlight: wrap lines present in refined but not in draft
+        function markUpImprovements(refinedMd, draftMd) {
+            try {
+                const draftLines = new Set(draftMd.split(/\r?\n/).map(s => s.trim()).filter(Boolean));
+                const out = refinedMd.split(/\r?\n/).map(line => {
+                    const t = line.trim();
+                    // Only highlight substantive content lines
+                    const isContent = /^(?:[-*]\s+|#+\s+|\w)/.test(t);
+                    if (isContent && t && !draftLines.has(t)) {
+                        return `<mark class="improvement">${line}</mark>`;
+                    }
+                    return line;
+                }).join('\n');
+                return out;
+            } catch (e) { console.warn('markUpImprovements failed', e); return refinedMd; }
+        }
+        function buildGradingOverlay(data) {
+            try {
+                const overlay = document.getElementById('grading-overlay');
+                if (!overlay) return;
+                const ev = data.evaluation || {};
+                const prec = ev.precision_analysis || {};
+                const rec = ev.recall_analysis || {};
+                const f1 = (typeof ev.f1_score === 'number') ? ev.f1_score : null;
+                const covered = Array.isArray(rec.jurisdictions_covered) ? rec.jurisdictions_covered : [];
+                const missing = Array.isArray(rec.jurisdictions_missing) ? rec.jurisdictions_missing : [];
+                const missingFacts = Array.isArray(ev.missing_facts) ? ev.missing_facts : [];
+                const unsupported = Array.isArray(ev.unsupported_claims) ? ev.unsupported_claims : [];
+                // Populate metrics
+                document.getElementById('metric-f1').textContent = `F1: ${percent(f1)}`;
+                document.getElementById('metric-precision').textContent = `Precision: ${percent(prec.precision_score)}`;
+                document.getElementById('metric-recall').textContent = `Recall: ${percent(rec.recall_score)}`;
+                // Jurisdictions
+                const covEl = document.getElementById('juris-covered');
+                const missEl = document.getElementById('juris-missing');
+                covEl.innerHTML = '<div style="margin-bottom:6px;">Covered:</div>' + (covered.length ? covered.map(j => `<span class="badge ok">${j}</span>`).join('') : '<span class="badge">–</span>');
+                missEl.innerHTML = '<div style="margin-top:6px;">Missing:</div>' + (missing.length ? missing.map(j => `<span class="badge missing">${j}</span>`).join('') : '<span class="badge ok">None</span>');
+                // Lists
+                const listMissing = document.getElementById('list-missing');
+                const listUnsup = document.getElementById('list-unsupported');
+                listMissing.innerHTML = missingFacts.length ? missingFacts.map(f => `<li>${DOMPurify.sanitize(String(f))}</li>`).join('') : '<li>No missing facts detected.</li>';
+                listUnsup.innerHTML = unsupported.length ? unsupported.map(f => `<li>${DOMPurify.sanitize(String(f))}</li>`).join('') : '<li>No unsupported claims detected.</li>';
+                // Bind close
+                const closeBtn = document.getElementById('gradingCloseBtn');
+                closeBtn.onclick = hideGradingOverlay;
+                overlay.onclick = (e) => { if (e.target === overlay) hideGradingOverlay(); };
+                document.addEventListener('keydown', escCloseOnce);
+            } catch (e) { console.warn('buildGradingOverlay failed', e); }
+        }
+        function showGradingOverlay() {
+            const overlay = document.getElementById('grading-overlay');
+            if (overlay) overlay.classList.add('show');
+        }
+        function hideGradingOverlay() {
+            const overlay = document.getElementById('grading-overlay');
+            if (overlay) overlay.classList.remove('show');
+            document.removeEventListener('keydown', escCloseOnce);
+        }
+        function escCloseOnce(e) { if (e.key === 'Escape') hideGradingOverlay(); }
         
         // Initialize document management modal event listeners after DOM is loaded
         const modal = document.getElementById('documentManagementModal');
