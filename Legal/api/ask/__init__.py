@@ -307,8 +307,11 @@ DRAFTER_SYSTEM_MESSAGE = (
     " (3) required permits/procedures, (4) penalties/enforcement, (5) any authoritative interpretations/guidance (agency or court) that clarify definitions/classifications,"
     " (6) safe storage/keeping and loss/theft reporting obligations, and (7) measurement methodology for legal thresholds (e.g., how blade or overall length is measured) where present."
     " Within '## Details', organize with bolded subheadings when relevant: Definitions & Carve-outs; Age & Eligibility; Permits & Procedures; Penalties & Enforcement; Practical Compliance & Measurement; Jurisdiction Notes."
+    " - **MAINTAINS MARKDOWN STRUCTURE**: Preserve the exact section format with ## Summary and ## Details headings, and use bullet lists in both sections (concise bullets in Summary; bulletized, optionally nested points in Details grouped under the subheadings). If the draft is not bulletized, convert it to this bulletized format."
+    " - Use '-' for bullets. Prefer bullets over paragraphs; avoid long prose blocks."
+    " Where present in the CONTEXT, briefly note: (a) categorical exemptions (e.g., penknife-type exemptions when explicitly stated), (b) dangerous-object/offensive-weapon caveats/classifications, and (c) venue- or security-screened-location specific thresholds and rules (e.g., transport hubs such as airports, including any blade-length limits)."
     " If age thresholds imply a rule for minors (e.g., minimum age \u2265 18), state the implication explicitly (e.g., permits are not issued to minors), without adding facts not present in the CONTEXT."
-)
+ )
 
 GRADER_REFINER_PROMPT = """
 You are a specialized legal document evaluator and refiner. Your task is to systematically evaluate a draft answer against source documents and produce an improved version.
@@ -334,6 +337,7 @@ From the CONTEXT documents, create a comprehensive inventory of ALL relevant leg
 - Exceptions, exemptions, and statutory carve-outs (e.g., categorical tool-type exclusions where stated)
 - Procedural requirements (permits, licenses, registration)
 - Definitions and classifications (what constitutes X, categories)
+- Dangerous-object/offensive-weapon classifications and caveats (where defined)
 - Age limits and permit eligibility/issuance rules (derive direct implications; e.g., if minimum age \u2265 N then minors < N cannot obtain permits)
 - Cross-border/international provisions (transit, import/export rules)
 - Penalties and consequences (what happens if violated)
@@ -341,7 +345,7 @@ From the CONTEXT documents, create a comprehensive inventory of ALL relevant leg
 - Safe storage/keeping and loss/theft reporting obligations
 - Measurement methodology for legal thresholds (e.g., blade length, overall length; how measured)
 - Temporal aspects (time limits, validity periods)
-- Location-specific rules (public vs private, specific venues)
+- Location-specific rules (public vs private, specific venues), including venue- and transport-security contexts (e.g., airports) and any associated threshold measurements
 - Conditional requirements (if X then Y rules)
 
 **For each fact, note:**
@@ -370,6 +374,9 @@ For EACH fact in your ground truth inventory (ensuring complete coverage of ALL 
 - Apply direct logical implications from explicit numeric thresholds (e.g., if the minimum age is 18, then permits are not issued to minors). Do not invent implications beyond what the text directly supports.
 - Avoid false negatives: do not mark facts as missing when the concept is clearly conveyed under synonymous or logically equivalent phrasing.
 - RAG-Only remains in force: never add facts that are not supported by the provided CONTEXT.
+- When the CONTEXT provides an authoritative interpretation (agency or court) equating categories (e.g., classifying a mechanism as belonging to a defined class), treat that equivalence as present when conveyed in the draft, even with different wording.
+- Consider duties as present when obligations are clearly described (e.g., safe storage/keeping; reporting loss/theft), even if the word "duty" is not used.
+- Consider measurement-method facts present when the draft clearly describes how a dimension is measured (e.g., blade or overall length measurement method), even if phrased differently.
 
 ## CRITICAL EVALUATION RULES
 
