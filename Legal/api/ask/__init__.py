@@ -155,14 +155,8 @@ def balance_country_representation(results: list[dict], iso_codes: list[str], ta
     
     return balanced_results[:target_k]
 
-def extract_iso_codes(text: str, client: AzureOpenAI, deploy_chat: str):
-    """Extracts ISO-3166-1 alpha-2 country codes and detection details from text using an LLM call.
-
-    Returns:
-        (iso_codes, detection_items):
-            iso_codes: list[str]
-            detection_items: list[dict] items like {"detected_phrase": str, "code": str}
-    """
+def extract_iso_codes(text: str, client: AzureOpenAI, deploy_chat: str) -> list[str]:
+    """Extracts ISO-3166-1 alpha-2 country codes from text using an LLM call."""
     try:
         response = with_retries(
             lambda: client.chat.completions.create(
@@ -180,29 +174,21 @@ def extract_iso_codes(text: str, client: AzureOpenAI, deploy_chat: str):
         cleaned_content = re.sub(r'^```json\s*|\s*```$', '', raw_content)
         data = json.loads(cleaned_content)
         if not isinstance(data, list):
-            return [], []
+            return []
 
         used_codes = set()
         results = []
-        detection_items = []
         for item in data:
             if isinstance(item, dict):
                 code = item.get("code")
-                phrase = item.get("detected_phrase")
                 if code and code not in used_codes:
                     results.append(code)
                     used_codes.add(code)
-                # Store raw item for UI mapping (keep duplicates allowed for transparency)
-                if code:
-                    detection_items.append({
-                        "code": code,
-                        "detected_phrase": phrase if isinstance(phrase, str) else None
-                    })
-        return results, detection_items
+        return results
 
     except (json.JSONDecodeError, IndexError, AttributeError) as e:
         logging.error(f"Error parsing country detection response: {e}")
-        return [], []
+        return []
 
 def retrieve(query: str, iso_codes: list[str], client: AzureOpenAI, config: dict, k: int = 5) -> list[dict]:
     """Retrieves documents from Azure Cognitive Search based on a vector query and filters.
@@ -286,8 +272,8 @@ def iso_to_flag(iso_code: str) -> str:
         return ""
     return "".join(chr(ord(char.upper()) - ord('A') + 0x1F1E6) for char in iso_code)
 
-def build_response_header(iso_codes: list[str], found_iso_codes: set[str], detection_map=None) -> str:
-    """Builds a Markdown table header to display detected countries, availability, and detected terms."""
+def build_response_header(iso_codes: list[str], found_iso_codes: set[str]) -> str:
+    """Builds a Markdown table header to display detected countries and their availability."""
     if not iso_codes:
         return ""
 
@@ -295,32 +281,16 @@ def build_response_header(iso_codes: list[str], found_iso_codes: set[str], detec
     main_header = "# Country Detection"
 
     # Create the table header and separator rows
-    table_header_line = "| Country | Document Available | Detected term(s) |"
-    table_separator_line = "|:-------:|:------------------:|:-----------------:|"
+    table_header_line = "| Detected in Query | Document Available |"
+    table_separator_line = "|:-----------------:|:------------------:|"
     
     # Create the data rows for each country
     data_lines = []
     for code in sorted(iso_codes):
         flag = iso_to_flag(code)
         availability_icon = "✅" if code in found_iso_codes else "❌"
-        # Detected terms associated with this code (if available)
-        detected_terms = "—"
-        if isinstance(detection_map, dict):
-            terms = detection_map.get(code, [])
-            if terms:
-                # Deduplicate while preserving order, limit length for readability
-                seen = set()
-                ordered = []
-                for t in terms:
-                    if isinstance(t, str) and t not in seen:
-                        seen.add(t)
-                        ordered.append(t)
-                # Show up to 3 terms to keep table compact
-                if ordered:
-                    more = "…" if len(ordered) > 3 else ""
-                    detected_terms = ", ".join(ordered[:3]) + more
         # Combine flag and code in the first column for clarity
-        data_lines.append(f"| {flag} ({code}) | {availability_icon} | {detected_terms} |")
+        data_lines.append(f"| {flag} ({code}) | {availability_icon} |")
 
     # Combine all parts into a single Markdown table string
     table = "\n".join([table_header_line, table_separator_line] + data_lines)
@@ -462,47 +432,16 @@ def chat(question: str, client: AzureOpenAI, config: dict) -> str:
     try:
         logging.info("DEBUG: Step 1 - Extracting ISO codes")
         t_iso_start = time.monotonic()
-        iso_codes, detection_items = extract_iso_codes(question, client, config['deploy_chat'])
+        iso_codes = extract_iso_codes(question, client, config['deploy_chat'])
         iso_ms = int((time.monotonic() - t_iso_start) * 1000)
         logging.info(f"TIMING: iso_detection_ms={iso_ms}")
         logging.info(f"DEBUG: ISO codes extracted: {iso_codes}")
-        # Build detection map: code -> list of detected phrases
-        detection_map = {}
-        try:
-            for it in (detection_items or []):
-                code = it.get('code') if isinstance(it, dict) else None
-                phrase = it.get('detected_phrase') if isinstance(it, dict) else None
-                if code:
-                    detection_map.setdefault(code, [])
-                    if isinstance(phrase, str) and phrase:
-                        detection_map[code].append(phrase)
-        except Exception as map_err:
-            logging.warning(f"DEBUG: Failed to build detection_map: {map_err}")
-            detection_map = {}
         
         if not iso_codes:
             logging.info("DEBUG: No ISO codes found, returning error message")
-            empty_found = set()
-            # Build detection summary for progress bar
-            def _build_summary(codes, dmap, found):
-                parts = []
-                for c in sorted(codes):
-                    terms = [t for t in (dmap.get(c, []) if isinstance(dmap, dict) else []) if isinstance(t, str) and t]
-                    term_str = ", ".join(list(dict.fromkeys(terms))[:2]) if terms else ""
-                    label = f"{c}: {term_str}".strip(': ')
-                    label += " ✅" if c in found else " ❌"
-                    parts.append(label)
-                return " | ".join(parts) if parts else "No countries detected"
-            summary = _build_summary(iso_codes, detection_map, empty_found) if iso_codes else "No countries detected"
             return json.dumps({
                 "country_header": "",
-                "refined_answer": "Could not determine a country from your query. Please be more specific.",
-                "country_detection": {
-                    "iso_codes": iso_codes,
-                    "items": detection_items,
-                    "map": detection_map,
-                    "summary": summary
-                }
+                "refined_answer": "Could not determine a country from your query. Please be more specific."
             }, indent=2)
 
         logging.info("DEBUG: Step 2 - Retrieving documents")
@@ -530,29 +469,12 @@ def chat(question: str, client: AzureOpenAI, config: dict) -> str:
             logging.info("DEBUG: No chunks found, building no-docs response")
             # Even if no docs are found, we can still show the header with availability status
             found_iso_codes = set()
-            header = build_response_header(iso_codes, found_iso_codes, detection_map)
-            # Build detection summary for progress bar
-            def _build_summary(codes, dmap, found):
-                parts = []
-                for c in sorted(codes):
-                    terms = [t for t in (dmap.get(c, []) if isinstance(dmap, dict) else []) if isinstance(t, str) and t]
-                    term_str = ", ".join(list(dict.fromkeys(terms))[:2]) if terms else ""
-                    label = f"{c}: {term_str}".strip(': ')
-                    label += " ✅" if c in found else " ❌"
-                    parts.append(label)
-                return " | ".join(parts) if parts else "No countries detected"
-            summary = _build_summary(iso_codes, detection_map, found_iso_codes)
+            header = build_response_header(iso_codes, found_iso_codes)
             no_docs_message = f"No documents found for the specified countries: {', '.join(iso_codes)}. Please try another query or check if the relevant legislation is available."
             logging.info("DEBUG: Returning no-docs message")
             return json.dumps({
                 "country_header": header,
-                "refined_answer": no_docs_message,
-                "country_detection": {
-                    "iso_codes": iso_codes,
-                    "items": detection_items,
-                    "map": detection_map,
-                    "summary": summary
-                }
+                "refined_answer": no_docs_message
             }, indent=2)
 
         logging.info("DEBUG: Step 3 - Preparing context for single-pass answer generation")
@@ -570,18 +492,7 @@ def chat(question: str, client: AzureOpenAI, config: dict) -> str:
 
         # Build the dynamic markdown table header for UI (not passed to the model)
         found_iso_codes = {chunk['iso_code'] for chunk in chunks}
-        header = build_response_header(iso_codes, found_iso_codes, detection_map)
-        # Build detection summary for progress bar
-        def _build_summary(codes, dmap, found):
-            parts = []
-            for c in sorted(codes):
-                terms = [t for t in (dmap.get(c, []) if isinstance(dmap, dict) else []) if isinstance(t, str) and t]
-                term_str = ", ".join(list(dict.fromkeys(terms))[:2]) if terms else ""
-                label = f"{c}: {term_str}".strip(': ')
-                label += " ✅" if c in found else " ❌"
-                parts.append(label)
-            return " | ".join(parts) if parts else "No countries detected"
-        summary = _build_summary(iso_codes, detection_map, found_iso_codes)
+        header = build_response_header(iso_codes, found_iso_codes)
         logging.info("DEBUG: Header built for UI")
 
         # Step 4: Generate a draft answer first (align with grader/refiner expectations)
@@ -697,13 +608,7 @@ def chat(question: str, client: AzureOpenAI, config: dict) -> str:
         logging.info("DEBUG: Step 8 - Building final systematic evaluation response")
         final_response = {
             "country_header": header,
-            "refined_answer": answer,
-            "country_detection": {
-                "iso_codes": iso_codes,
-                "items": detection_items,
-                "map": detection_map,
-                "summary": summary
-            }
+            "refined_answer": answer
         }
         
         total_ms = int((time.monotonic() - t_total_start) * 1000)
