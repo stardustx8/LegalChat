@@ -7,6 +7,15 @@
         <script src="js/marked.min.js"></script>
         <script src="https://cdn.jsdelivr.net/npm/dompurify@3.0.9/dist/purify.min.js"></script>
         <script src="https://cdnjs.cloudflare.com/ajax/libs/diff_match_patch/20121119/diff_match_patch.min.js"></script>
+        <script type="module">
+            // Load HTML-aware diff library and expose globally for sync access
+            import('https://esm.sh/htmldiff-js@1.0.5')
+                .then(m => {
+                    const HtmlDiff = (m && (m.default || m));
+                    if (HtmlDiff) window.HtmlDiff = HtmlDiff;
+                })
+                .catch(e => console.warn('HtmlDiff ESM load failed; will fall back to text diff', e));
+        </script>
     <style>
         :root {
             /* Color tokens */
@@ -794,7 +803,11 @@
 
         /* Inline improvement highlight */
         mark.improvement { background: #fff4c2; padding: 0 .15em; border-radius: .2em; box-shadow: inset 0 -1px 0 rgba(0,0,0,.05); }
+        /* Fallback removal style (older impl) */
         del.removal { background: #ffe7e7; color: #8a1f1f; text-decoration: line-through; padding: 0 .1em; border-radius: .15em; }
+        /* HTML-aware diff styles */
+        ins.diffins, ins.diffmod, ins.mod { background: #fffbe6; text-decoration: none; border-bottom: 1px dotted #e0c200; }
+        del.diffdel, del.diffmod { background: #ffe7e7; color: #8a1f1f; text-decoration: line-through; }
 
         /* Grading overlay */
         .grading-overlay { position: fixed; inset: 0; background: rgba(15, 23, 42, 0.55); display: none; align-items: center; justify-content: center; z-index: 1000; }
@@ -1536,10 +1549,10 @@
                     // Update answer with refined text + highlights
                     const refinedMd = String(graded.refined_answer || '');
                     const draftMd = String(graded.draft_answer || '');
-                    lastAnswerPlainHTML = DOMPurify.sanitize(marked.parse(refinedMd));
+                    lastAnswerPlainHTML = DOMPurify.sanitize(marked.parse(refinedMd), { ADD_TAGS: ['ins','del','mark'], ADD_ATTR: ['class'] });
                     const missingFacts = (graded.evaluation && Array.isArray(graded.evaluation.missing_facts)) ? graded.evaluation.missing_facts : [];
-                    const highlightedMd = markUpImprovements(refinedMd, draftMd, missingFacts);
-                    lastAnswerHighlightedHTML = DOMPurify.sanitize(marked.parse(highlightedMd));
+                    const highlightedHtml = markUpImprovements(refinedMd, draftMd, missingFacts);
+                    lastAnswerHighlightedHTML = DOMPurify.sanitize(highlightedHtml, { ADD_TAGS: ['ins','del','mark'], ADD_ATTR: ['class'] });
                     refinedAnswerContainer.innerHTML = lastAnswerHighlightedHTML || lastAnswerPlainHTML;
                     normalizeAnswerHeading();
                     refinedAnswerContainer.querySelectorAll('a[href]').forEach(a => { a.setAttribute('target','_blank'); a.setAttribute('rel','noopener noreferrer'); });
@@ -1589,10 +1602,35 @@
             if (f1 >= 0.60) return 'D';
             return 'F';
         }
-        // Simple line-aware highlight: wrap lines present in refined but not in draft
+        // Build HTML-aware diff: preserves formatting, highlights insertions and strikes deletions.
         function markUpImprovements(refinedMd, draftMd, missingFacts = []) {
             try {
-                // Helper: build regex patterns for missing facts, flexible whitespace
+                // Convert Markdown to HTML first so diff preserves structure
+                const refinedHTML = marked.parse(String(refinedMd || ''));
+                const draftHTML = marked.parse(String(draftMd || ''));
+
+                // Compute HTML diff if available; fallback to text diff
+                let diffHTML = '';
+                if (window.HtmlDiff && typeof window.HtmlDiff.execute === 'function') {
+                    diffHTML = window.HtmlDiff.execute(draftHTML, refinedHTML);
+                } else if (typeof diff_match_patch !== 'undefined') {
+                    // Fallback to text diff, then parse as HTML
+                    const dmp = new diff_match_patch();
+                    dmp.Diff_Timeout = 0.5;
+                    const diffs = dmp.diff_main(String(draftMd || ''), String(refinedMd || ''));
+                    dmp.diff_cleanupSemantic(diffs);
+                    let md = '';
+                    for (const [op, data] of diffs) {
+                        if (op === 0) md += data;
+                        else if (op === 1) md += data; // inserts; missing facts marked below after HTML conversion
+                        else if (op === -1) md += `<del class=\"diffdel\">${data}</del>`;
+                    }
+                    diffHTML = marked.parse(md);
+                } else {
+                    diffHTML = refinedHTML;
+                }
+
+                // Highlight missing facts within inserted segments only
                 const buildPatterns = (facts) => {
                     const patterns = [];
                     (facts || []).forEach(f => {
@@ -1603,39 +1641,53 @@
                     });
                     return patterns;
                 };
-
                 const patterns = buildPatterns(missingFacts);
-                const highlightMissing = (text) => {
-                    let out = text;
-                    for (const rx of patterns) {
-                        out = out.replace(rx, (m) => `<mark class="improvement">${m}</mark>`);
-                    }
-                    return out;
-                };
 
-                // Prefer diff-match-patch if available to show deletions inline
-                if (typeof diff_match_patch !== 'undefined') {
-                    const dmp = new diff_match_patch();
-                    dmp.Diff_Timeout = 0.5;
-                    const diffs = dmp.diff_main(draftMd, refinedMd);
-                    dmp.diff_cleanupSemantic(diffs);
-                    let rebuilt = '';
-                    for (const [op, data] of diffs) {
-                        if (op === 0) { // equal
-                            rebuilt += data;
-                        } else if (op === 1) { // insert in refined
-                            rebuilt += highlightMissing(data);
-                        } else if (op === -1) { // deleted from draft
-                            // Show deletions struck-through
-                            rebuilt += `<del class="removal">${data}</del>`;
+                if (patterns.length) {
+                    const tmp = document.createElement('div');
+                    tmp.innerHTML = diffHTML;
+                    const insNodes = tmp.querySelectorAll('ins');
+                    if (insNodes.length) {
+                        insNodes.forEach(ins => {
+                            let html = ins.innerHTML;
+                            for (const rx of patterns) { html = html.replace(rx, m => `<mark class=\"improvement\">${m}</mark>`); }
+                            ins.innerHTML = html;
+                        });
+                    } else {
+                        // No <ins> nodes (likely fallback path). Highlight missing facts in non-deleted text nodes.
+                        const combined = new RegExp(patterns.map(p => `(${p.source})`).join('|'), 'gi');
+                        const walker = document.createTreeWalker(tmp, NodeFilter.SHOW_TEXT, {
+                            acceptNode: (node) => node.parentElement && node.parentElement.closest('del') ? NodeFilter.FILTER_REJECT : NodeFilter.FILTER_ACCEPT
+                        });
+                        const toProcess = [];
+                        let node;
+                        while ((node = walker.nextNode())) { toProcess.push(node); }
+                        for (const textNode of toProcess) {
+                            const text = textNode.nodeValue || '';
+                            combined.lastIndex = 0;
+                            let match; let last = 0; const frag = document.createDocumentFragment(); let found = false;
+                            while ((match = combined.exec(text)) !== null) {
+                                const idx = match.index;
+                                if (idx > last) frag.appendChild(document.createTextNode(text.slice(last, idx)));
+                                const mark = document.createElement('mark');
+                                mark.className = 'improvement';
+                                mark.textContent = match[0];
+                                frag.appendChild(mark);
+                                last = idx + match[0].length;
+                                found = true;
+                                if (combined.lastIndex === idx) combined.lastIndex++; // avoid zero-length loops
+                            }
+                            if (found) {
+                                if (last < text.length) frag.appendChild(document.createTextNode(text.slice(last)));
+                                textNode.parentNode.replaceChild(frag, textNode);
+                            }
                         }
                     }
-                    return rebuilt;
+                    return tmp.innerHTML;
                 }
 
-                // Fallback: no diff library, only missing-fact highlights in refined
-                return highlightMissing(refinedMd);
-            } catch (e) { console.warn('markUpImprovements failed', e); return refinedMd; }
+                return diffHTML;
+            } catch (e) { console.warn('markUpImprovements failed', e); return marked.parse(String(refinedMd || '')); }
         }
         function buildGradingOverlay(data) {
             try {
