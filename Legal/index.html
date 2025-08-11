@@ -740,7 +740,7 @@
         }
         
         /* Query Progress (Ask flow) */
-        .query-progress { margin-top: 1rem; }
+        .query-progress { margin-top: 1rem; margin-bottom: var(--space-4); }
         .query-progress-bar {
             width: 100%;
             height: 8px;
@@ -772,16 +772,28 @@
         @media (prefers-reduced-motion: reduce) { .skeleton { animation: none; } }
 
         /* Answer actions */
-        .answer-header { display: flex; align-items: center; justify-content: space-between; gap: var(--space-2); }
-        .answer-actions { display: inline-flex; gap: var(--space-2); }
+        .answer-header { display: flex; align-items: center; justify-content: space-between; gap: var(--space-2); margin-top: var(--space-3); padding-bottom: .5rem; border-bottom: 1px solid #e5e7eb; }
+        .answer-header h2 { font-size: 1.5rem; font-weight: 700; color: #0f172a; }
+        .answer-actions { display: inline-flex; gap: var(--space-2); align-items: center; }
+        /* Compact status pill shown after completion */
+        .status-pill { display: inline-flex; align-items: center; gap: .375rem; padding: .25rem .5rem; border-radius: 9999px; border: 1px solid #e5e7eb; background: #f8fafc; color: #0f172a; font-size: .875rem; line-height: 1.25rem; font-weight: 600; }
+        .status-pill .dot { width: 8px; height: 8px; border-radius: 50%; background: #94a3b8; }
+        .status-pill.success { background: #ecfdf5; border-color: #a7f3d0; color: #065f46; }
+        .status-pill.success .dot { background: #10b981; }
+        .status-pill.error { background: #fef2f2; border-color: #fecaca; color: #991b1b; }
+        .status-pill.error .dot { background: #ef4444; }
+        #refined-answer-container { margin-top: var(--space-2); }
+        /* Heading spacing inside the answer (demotion handled via JS) */
+        #refined-answer-container h3 { margin-top: var(--space-4); }
         .btn-secondary { width: auto; padding: .5rem .75rem; margin-top: 0; font-weight: 600; background: #ffffff; color: var(--accent); border: 1px solid #e5e7eb; border-radius: var(--radius-sm); }
         .btn-secondary:hover { background: #f9fafb; }
         .btn-secondary:focus-visible { box-shadow: 0 0 0 3px var(--ring); }
+        @media (max-width: 640px) { .answer-header { flex-wrap: wrap; } .answer-actions { margin-top: var(--space-2); } }
 
         /* Print: show only the answer content */
         @media print {
             body { background: #fff; }
-            .document-management-trigger, #query-progress, details, textarea, #askButton, h1, #country-header-container, hr { display: none !important; }
+            .document-management-trigger, #query-progress, #query-status-pill, details, textarea, #askButton, h1, #country-header-container, hr { display: none !important; }
             #refined-answer-container { color: #000; }
         }
     </style>
@@ -868,6 +880,10 @@
             <div class="answer-header">
                 <h2>Answer</h2>
                 <div class="answer-actions">
+                    <div id="query-status-pill" class="status-pill hidden" aria-live="polite" aria-label="Status">
+                        <span class="dot" aria-hidden="true"></span>
+                        <span class="label">Preparing…</span>
+                    </div>
                     <button id="copyAnswerBtn" class="btn-secondary" type="button" aria-label="Copy answer">Copy</button>
                     <button id="printAnswerBtn" class="btn-secondary" type="button" aria-label="Print answer">Print</button>
                 </div>
@@ -1187,6 +1203,8 @@
             const progressBarEl = document.querySelector('#query-progress .query-progress-bar');
             const queryProgressFill = document.querySelector('#query-progress .query-progress-fill');
             const queryStatus = document.getElementById('query-status');
+            const statusPill = document.getElementById('query-status-pill');
+            const statusPillLabel = statusPill ? statusPill.querySelector('.label') : null;
             const ariaLive = document.getElementById('aria-live-status');
             const copyAnswerBtn = document.getElementById('copyAnswerBtn');
             const printAnswerBtn = document.getElementById('printAnswerBtn');
@@ -1199,6 +1217,34 @@
             }
 
             function announce(msg) { if (ariaLive) ariaLive.textContent = msg; }
+            // Normalize heading hierarchy in rendered answer (demote leading H2 'Summary' to H3)
+            function normalizeAnswerHeading() {
+                try {
+                    const container = refinedAnswerContainer;
+                    if (!container) return;
+                    const firstEl = container.firstElementChild;
+                    if (firstEl && firstEl.tagName === 'H2' && firstEl.textContent.trim().toLowerCase() === 'summary') {
+                        const h3 = document.createElement('h3');
+                        while (firstEl.firstChild) h3.appendChild(firstEl.firstChild);
+                        container.replaceChild(h3, firstEl);
+                    }
+                } catch (e) { console.warn('normalizeAnswerHeading failed', e); }
+            }
+
+            function hideStatusPill() {
+                if (!statusPill) return;
+                statusPill.classList.add('hidden');
+                statusPill.classList.remove('success', 'error');
+                if (statusPillLabel) statusPillLabel.textContent = 'Preparing…';
+            }
+
+            function showStatusPill(kind, text) {
+                if (!statusPill) return;
+                statusPill.classList.remove('hidden', 'success', 'error');
+                if (kind === 'success') statusPill.classList.add('success');
+                else if (kind === 'error') statusPill.classList.add('error');
+                if (statusPillLabel) statusPillLabel.textContent = text || '';
+            }
 
             function startQueryProgress() {
                 // Clear any pending dismiss handler from previous query
@@ -1206,6 +1252,8 @@
                     document.removeEventListener('click', queryProgressDismissHandler);
                     queryProgressDismissHandler = null;
                 }
+                // Hide compact pill for a fresh run
+                hideStatusPill();
                 if (queryProgress) {
                     queryProgress.classList.remove('hidden');
                 }
@@ -1267,29 +1315,18 @@
 
             function finishQueryProgress(success = true, finalDetail = '') {
                 clearQueryProgressTimers();
+                if (refinedAnswerContainer) refinedAnswerContainer.classList.remove('skeleton');
+                // Complete the progress values (even if we hide it) for ARIA correctness
                 if (queryProgressFill) queryProgressFill.style.width = '100%';
                 if (progressBarEl) progressBarEl.setAttribute('aria-valuenow', '100');
-                const doneText = success ? (finalDetail ? `Answer ready — ${finalDetail}` : 'Answer ready') : 'An error occurred';
-                const dismissHint = ' Click anywhere to dismiss.';
-                const finalDisplay = doneText + dismissHint;
-                if (progressBarEl) progressBarEl.setAttribute('aria-valuetext', finalDisplay);
-                if (queryStatus) queryStatus.textContent = finalDisplay;
+                const doneText = success ? 'Answer ready' : 'An error occurred';
+                const pillText = finalDetail || doneText;
+                if (progressBarEl) progressBarEl.setAttribute('aria-valuetext', pillText);
+                if (queryStatus) queryStatus.textContent = pillText;
+                // Hide the large progress UI and show compact pill in header
+                if (queryProgress) queryProgress.classList.add('hidden');
+                showStatusPill(success ? 'success' : 'error', pillText);
                 announce(doneText);
-                // Keep visible until user clicks anywhere, then hide and cleanup
-                if (queryProgressDismissHandler) {
-                    document.removeEventListener('click', queryProgressDismissHandler);
-                }
-                queryProgressDismissHandler = () => {
-                    if (queryProgress) queryProgress.classList.add('hidden');
-                    if (queryProgressFill) queryProgressFill.style.width = '0%';
-                    if (progressBarEl) progressBarEl.setAttribute('aria-valuenow', '0');
-                    if (progressBarEl) progressBarEl.setAttribute('aria-valuetext', 'Idle');
-                    if (queryStatus) queryStatus.textContent = '';
-                    if (refinedAnswerContainer) refinedAnswerContainer.classList.remove('skeleton');
-                    document.removeEventListener('click', queryProgressDismissHandler);
-                    queryProgressDismissHandler = null;
-                };
-                document.addEventListener('click', queryProgressDismissHandler);
             }
         
             console.log('DEBUG: Setting up askButton event listener');
@@ -1329,10 +1366,14 @@
                     if (data && data.refined_answer) {
                         const answerHTML = DOMPurify.sanitize(marked.parse(data.refined_answer));
                         refinedAnswerContainer.innerHTML = answerHTML;
+                        if (refinedAnswerContainer) refinedAnswerContainer.classList.remove('skeleton');
                         // Secure outbound links
                         refinedAnswerContainer.querySelectorAll('a[href]').forEach(a => { a.setAttribute('target','_blank'); a.setAttribute('rel','noopener noreferrer'); });
+                        // Demote leading 'Summary' H2 to H3 for clearer hierarchy under 'Answer'
+                        normalizeAnswerHeading();
                     } else {
                         refinedAnswerContainer.textContent = 'No valid answer found in the response.';
+                        if (refinedAnswerContainer) refinedAnswerContainer.classList.remove('skeleton');
                     }
                     // Show detected countries as soon as we have them, then finalize
                     const summary = (data && data.country_detection && data.country_detection.summary) ? data.country_detection.summary : '';
@@ -1343,7 +1384,7 @@
                         announce(detectText);
                     }
                     // Finish progress on success with availability shown
-                    const finalDetail = (data && data.country_detection && data.country_detection.summary) ? `Countries: ${data.country_detection.summary}` : '';
+                    const finalDetail = (data && data.country_detection && data.country_detection.summary) ? `Detected countries: ${data.country_detection.summary}` : '';
                     finishQueryProgress(true, finalDetail);
                 } else {
                     const errorText = await response.text();
