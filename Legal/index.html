@@ -1244,13 +1244,14 @@
                 }, 20000));
             }
 
-            function finishQueryProgress(success = true) {
+            function finishQueryProgress(success = true, finalDetail = '') {
                 clearQueryProgressTimers();
                 if (queryProgressFill) queryProgressFill.style.width = '100%';
                 if (progressBarEl) progressBarEl.setAttribute('aria-valuenow', '100');
-                if (progressBarEl) progressBarEl.setAttribute('aria-valuetext', success ? 'Answer ready' : 'An error occurred');
-                if (queryStatus) queryStatus.textContent = success ? 'Answer ready' : 'An error occurred';
-                announce(success ? 'Answer ready' : 'An error occurred');
+                const doneText = success ? (finalDetail ? `Answer ready — ${finalDetail}` : 'Answer ready') : 'An error occurred';
+                if (progressBarEl) progressBarEl.setAttribute('aria-valuetext', doneText);
+                if (queryStatus) queryStatus.textContent = doneText;
+                announce(doneText);
                 setTimeout(() => {
                     if (queryProgress) queryProgress.classList.add('hidden');
                     if (queryProgressFill) queryProgressFill.style.width = '0%';
@@ -1314,8 +1315,9 @@
                     } else {
                         refinedAnswerContainer.textContent = 'No valid answer found in the response.';
                     }
-                    // Finish progress on success
-                    finishQueryProgress(true);
+                    // Finish progress on success with country detection summary (if available)
+                    const summary = (data && data.country_detection && data.country_detection.summary) ? `Countries: ${data.country_detection.summary}` : '';
+                    finishQueryProgress(true, summary);
                 } else {
                     const errorText = await response.text();
                     console.error('ERROR: HTTP response not OK:', response.status);
