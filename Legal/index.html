@@ -775,16 +775,10 @@
         .answer-header { display: flex; align-items: center; justify-content: space-between; gap: var(--space-2); margin-top: var(--space-3); padding-bottom: .5rem; border-bottom: 1px solid #e5e7eb; }
         .answer-header h2 { font-size: 1.5rem; font-weight: 700; color: #0f172a; }
         .answer-actions { display: inline-flex; gap: var(--space-2); align-items: center; }
-        /* Compact status pill shown after completion */
-        .status-pill { display: inline-flex; align-items: center; gap: .375rem; padding: .25rem .5rem; border-radius: 9999px; border: 1px solid #e5e7eb; background: #f8fafc; color: #0f172a; font-size: .875rem; line-height: 1.25rem; font-weight: 600; }
-        .status-pill .dot { width: 8px; height: 8px; border-radius: 50%; background: #94a3b8; }
-        .status-pill.success { background: #ecfdf5; border-color: #a7f3d0; color: #065f46; }
-        .status-pill.success .dot { background: #10b981; }
-        .status-pill.error { background: #fef2f2; border-color: #fecaca; color: #991b1b; }
-        .status-pill.error .dot { background: #ef4444; }
         #refined-answer-container { margin-top: var(--space-2); }
-        /* Heading spacing inside the answer (demotion handled via JS) */
-        #refined-answer-container h3 { margin-top: var(--space-4); }
+        /* Unify heading sizes inside the answer to match 'Summary' */
+        #refined-answer-container h2,
+        #refined-answer-container h3 { font-size: 1.125rem; line-height: 1.5rem; font-weight: 700; color: #1c2430; margin-top: var(--space-4); }
         .btn-secondary { width: auto; padding: .5rem .75rem; margin-top: 0; font-weight: 600; background: #ffffff; color: var(--accent); border: 1px solid #e5e7eb; border-radius: var(--radius-sm); }
         .btn-secondary:hover { background: #f9fafb; }
         .btn-secondary:focus-visible { box-shadow: 0 0 0 3px var(--ring); }
@@ -793,7 +787,7 @@
         /* Print: show only the answer content */
         @media print {
             body { background: #fff; }
-            .document-management-trigger, #query-progress, #query-status-pill, details, textarea, #askButton, h1, #country-header-container, hr { display: none !important; }
+            .document-management-trigger, #query-progress, details, textarea, #askButton, h1, #country-header-container, hr { display: none !important; }
             #refined-answer-container { color: #000; }
         }
     </style>
@@ -880,10 +874,6 @@
             <div class="answer-header">
                 <h2>Answer</h2>
                 <div class="answer-actions">
-                    <div id="query-status-pill" class="status-pill hidden" aria-live="polite" aria-label="Status">
-                        <span class="dot" aria-hidden="true"></span>
-                        <span class="label">Preparing…</span>
-                    </div>
                     <button id="copyAnswerBtn" class="btn-secondary" type="button" aria-label="Copy answer">Copy</button>
                     <button id="printAnswerBtn" class="btn-secondary" type="button" aria-label="Print answer">Print</button>
                 </div>
@@ -1203,8 +1193,6 @@
             const progressBarEl = document.querySelector('#query-progress .query-progress-bar');
             const queryProgressFill = document.querySelector('#query-progress .query-progress-fill');
             const queryStatus = document.getElementById('query-status');
-            const statusPill = document.getElementById('query-status-pill');
-            const statusPillLabel = statusPill ? statusPill.querySelector('.label') : null;
             const ariaLive = document.getElementById('aria-live-status');
             const copyAnswerBtn = document.getElementById('copyAnswerBtn');
             const printAnswerBtn = document.getElementById('printAnswerBtn');
@@ -1231,20 +1219,7 @@
                 } catch (e) { console.warn('normalizeAnswerHeading failed', e); }
             }
 
-            function hideStatusPill() {
-                if (!statusPill) return;
-                statusPill.classList.add('hidden');
-                statusPill.classList.remove('success', 'error');
-                if (statusPillLabel) statusPillLabel.textContent = 'Preparing…';
-            }
-
-            function showStatusPill(kind, text) {
-                if (!statusPill) return;
-                statusPill.classList.remove('hidden', 'success', 'error');
-                if (kind === 'success') statusPill.classList.add('success');
-                else if (kind === 'error') statusPill.classList.add('error');
-                if (statusPillLabel) statusPillLabel.textContent = text || '';
-            }
+            // Status pill removed; progress bar remains visible at completion
 
             function startQueryProgress() {
                 // Clear any pending dismiss handler from previous query
@@ -1252,8 +1227,8 @@
                     document.removeEventListener('click', queryProgressDismissHandler);
                     queryProgressDismissHandler = null;
                 }
-                // Hide compact pill for a fresh run
-                hideStatusPill();
+                // Ensure progress UI is visible for a fresh run
+                if (queryProgress) queryProgress.classList.remove('hidden');
                 if (queryProgress) {
                     queryProgress.classList.remove('hidden');
                 }
@@ -1320,12 +1295,11 @@
                 if (queryProgressFill) queryProgressFill.style.width = '100%';
                 if (progressBarEl) progressBarEl.setAttribute('aria-valuenow', '100');
                 const doneText = success ? 'Answer ready' : 'An error occurred';
-                const pillText = finalDetail || doneText;
-                if (progressBarEl) progressBarEl.setAttribute('aria-valuetext', pillText);
-                if (queryStatus) queryStatus.textContent = pillText;
-                // Hide the large progress UI and show compact pill in header
-                if (queryProgress) queryProgress.classList.add('hidden');
-                showStatusPill(success ? 'success' : 'error', pillText);
+                const finalText = finalDetail || doneText;
+                if (progressBarEl) progressBarEl.setAttribute('aria-valuetext', finalText);
+                if (queryStatus) queryStatus.textContent = finalText;
+                // Keep the progress bar visible with final detected countries text
+                if (queryProgress) queryProgress.classList.remove('hidden');
                 announce(doneText);
             }
         
