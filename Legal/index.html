@@ -1000,8 +1000,10 @@
         const azureSearchApiKey = "nq3Nn1MhSWdXCQdpqP1eADOA4NNrJDLQGfaWGNgJCuAzSeAqBMTX";
         
         // Configure the Azure Function App URL for uploads
-        // Set this to your Azure Function App URL, e.g., 'https://your-function-app.azurewebsites.net'
-        window.LEGALDOCS_PROCESSOR_BASE_URL = 'https://legaldocs-processor.azurewebsites.net';
+        // IMPORTANT: Set this to your actual Azure Function App URL
+        // Example: window.LEGALDOCS_PROCESSOR_BASE_URL = 'https://your-function-app.azurewebsites.net';
+        // If not set, will use relative URL /api/upload_blob (works if hosted together)
+        // window.LEGALDOCS_PROCESSOR_BASE_URL = '';
         
         // Global variables for document management
         let documentStatus = [];
