@@ -915,6 +915,9 @@
                         <input type="file" id="fileInput" accept=".docx" multiple onchange="handleAdminFileSelection(event)" style="display: none;">
                         <button onclick="document.getElementById('fileInput').click()" style="padding: 8px 16px; background: #007bff; color: white; border: none; border-radius: 5px; cursor: pointer;">Browse Files</button>
                     </div>
+                    
+                    <div id="fileList" style="margin: 20px 0;"></div>
+                    
                     <div style="background: #fff3cd; padding: 10px; border-radius: 5px; margin: 20px 0;">
                         <p style="margin: 5px 0;"><strong>⚠️ Important:</strong></p>
                         <ul style="margin: 5px 0; padding-left: 20px;">
@@ -1004,12 +1007,10 @@
             const modal = document.getElementById('adminUploadModal');
             modal.style.display = 'block';
             
-            // Check if passcode was already verified in session
-            const storedPass = sessionStorage.getItem(PASSCODE_KEY);
-            if (storedPass) {
-                document.getElementById('passcodeGate').style.display = 'none';
-                document.getElementById('uploadInterface').style.display = 'block';
-            }
+            // Don't auto-skip passcode gate - always require it
+            document.getElementById('passcodeGate').style.display = 'block';
+            document.getElementById('uploadInterface').style.display = 'none';
+            document.getElementById('adminPasscode').value = '';
         }
         
         function closeAdminUpload() {
@@ -1025,11 +1026,14 @@
         
         function verifyPasscode() {
             const passcode = document.getElementById('adminPasscode').value;
-            if (passcode) {
-                sessionStorage.setItem(PASSCODE_KEY, passcode);
-                document.getElementById('passcodeGate').style.display = 'none';
-                document.getElementById('uploadInterface').style.display = 'block';
+            // Only accept non-empty passcode (backend will validate actual value)
+            if (!passcode || passcode.trim() === '') {
+                alert('Please enter a passcode');
+                return;
             }
+            sessionStorage.setItem(PASSCODE_KEY, passcode);
+            document.getElementById('passcodeGate').style.display = 'none';
+            document.getElementById('uploadInterface').style.display = 'block';
         }
         
         async function uploadFiles() {
@@ -1057,7 +1061,12 @@
                 
                 try {
                     const base64 = await fileToBase64(file);
-                    const response = await fetch('/api/upload_blob', {
+                    
+                    // Use configured upload URL or default to /api/upload_blob
+                    const uploadUrl = window.UPLOAD_BLOB_URL || 
+                                     (window.LEGALDOCS_PROCESSOR_BASE_URL ? window.LEGALDOCS_PROCESSOR_BASE_URL + '/api/upload_blob' : '/api/upload_blob');
+                    
+                    const response = await fetch(uploadUrl, {
                         method: 'POST',
                         headers: {
                             'Content-Type': 'application/json',
@@ -1832,10 +1841,10 @@
                 return;
             }
             
-            listDiv.innerHTML = '<strong>Selected files:</strong><ul>' + 
+            listDiv.innerHTML = '<strong>Selected files:</strong><ul style="list-style-type: disc; margin: 10px 0; padding-left: 20px;">' + 
                 selectedFiles.map(f => `<li>${f.name}</li>`).join('') + 
                 '</ul>';
-            uploadBtn.style.display = 'block';
+            uploadBtn.style.display = 'inline-block';
         }
         
         // Upload flow
