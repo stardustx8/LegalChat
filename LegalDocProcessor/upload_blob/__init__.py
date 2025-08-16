@@ -18,7 +18,18 @@ def main(req: func.HttpRequest) -> func.HttpResponse:
                 status_code=400,
                 mimetype="application/json"
             )
-        
+
+        # Admin passcode gating (if LEGAL_UPLOAD_PASSWORD is set)
+        expected_pass = os.environ.get('LEGAL_UPLOAD_PASSWORD', '').strip()
+        if expected_pass:
+            provided_pass = (req.headers.get('x-legal-admin-passcode') or req_body.get('passcode') or '').strip()
+            if provided_pass != expected_pass:
+                return func.HttpResponse(
+                    json.dumps({"success": False, "message": "Unauthorized: invalid passcode"}),
+                    status_code=401,
+                    mimetype="application/json"
+                )
+
         # Extract required fields
         filename = req_body.get('filename')
         file_data = req_body.get('file_data')  # Base64 encoded file content

@@ -150,7 +150,26 @@
         .document-management-trigger {
             margin-top: 20px;
             text-align: center;
-            display: none; /* Hidden by default, kept in DOM */
+        }
+        
+        /* Admin link styling */
+        .admin-link {
+            position: fixed;
+            bottom: 20px;
+            right: 20px;
+            background: #007bff;
+            color: white;
+            padding: 10px 20px;
+            border-radius: 5px;
+            text-decoration: none;
+            font-weight: 600;
+            cursor: pointer;
+            z-index: 100;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.2);
+        }
+        
+        .admin-link:hover {
+            background: #0056b3;
         }
         
         .doc-mgmt-btn {
@@ -838,7 +857,10 @@
         <button id="askButton">Ask!</button>
         <div id="aria-live-status" class="sr-only" aria-live="polite"></div>
         
-        <!-- Document Management Button -->
+        <!-- Admin Link (bottom right) -->
+        <a href="#" class="admin-link" onclick="openDocumentManagement(); return false;">Admin</a>
+        
+        <!-- Document Management Button (alternative access) -->
         <div class="document-management-trigger">
             <button id="openDocMgmtBtn" onclick="openDocumentManagement()" class="doc-mgmt-btn">
                 📁 Manage Documents
@@ -878,7 +900,8 @@
                         <h3>📤 Upload New Documents</h3>
                         <div class="upload-guidance">
                             <p><strong>Filename Requirements:</strong> Files must be named with valid ISO 3166-1 alpha-2 country codes (e.g., DE.docx, FR.docx, CH.docx)</p>
-                            <p><strong>Note:</strong> Uploading a file with an existing country code will replace the current document for that country.</p>
+                            <p><strong>Note:</strong> Uploading a file with an existing country code will replace the current document for that country and overwrite its indexed content.</p>
+                            <p><strong>Security:</strong> Admin passcode required to upload. <button id="setPasscodeBtn" class="link-btn" type="button">Set/Change passcode</button></p>
                         </div>
                         <div class="upload-area">
                             <input type="file" id="fileInput" accept=".docx" multiple style="display: none;">
@@ -1766,6 +1789,7 @@
                 const fileInput = document.getElementById('fileInput');
                 const browseBtn = document.getElementById('browseBtn');
                 const dropZone = document.getElementById('dropZone');
+                const setPasscodeBtn = document.getElementById('setPasscodeBtn');
                 
                 if (browseBtn && fileInput) {
                     browseBtn.addEventListener('click', () => fileInput.click());
@@ -1777,7 +1801,12 @@
                 
                 if (dropZone) {
                     dropZone.addEventListener('dragover', handleDragOver);
+                    dropZone.addEventListener('dragleave', handleDragLeave);
                     dropZone.addEventListener('drop', handleFileDrop);
+                }
+
+                if (setPasscodeBtn) {
+                    setPasscodeBtn.addEventListener('click', promptForPasscode);
                 }
             }
         
@@ -1799,6 +1828,149 @@
                     }, 10000);
                 }
             }
+        }
+        
+        // --- Admin upload helpers ---
+        const PASSCODE_STORAGE_KEY = 'legal_admin_passcode';
+        function getStoredPasscode() { try { return sessionStorage.getItem(PASSCODE_STORAGE_KEY) || ''; } catch(_) { return ''; } }
+        function setStoredPasscode(pass) { try { sessionStorage.setItem(PASSCODE_STORAGE_KEY, String(pass || '')); } catch(_) { /* ignore */ } }
+        function promptForPasscode() {
+            const p = prompt('Enter Admin passcode for uploads');
+            if (p !== null) setStoredPasscode(p.trim());
+        }
+        function ensurePasscode() {
+            let p = getStoredPasscode();
+            if (!p) { promptForPasscode(); p = getStoredPasscode(); }
+            return p;
+        }
+        function getUploadBlobUrl() {
+            try {
+                const explicit = (window && window.UPLOAD_BLOB_URL) ? String(window.UPLOAD_BLOB_URL) : '';
+                if (explicit) return explicit;
+                const base = (window && window.LEGALDOCS_PROCESSOR_BASE_URL) ? String(window.LEGALDOCS_PROCESSOR_BASE_URL) : '';
+                if (base) return base.replace(/\/$/, '') + '/upload_blob';
+            } catch(_) { /* ignore */ }
+            return '/api/upload_blob';
+        }
+        
+        // Drag & drop handlers
+        function handleDragOver(e) { e.preventDefault(); const dz = document.getElementById('dropZone'); if (dz) dz.classList.add('drag-over'); }
+        function handleDragLeave(e) { e.preventDefault(); const dz = document.getElementById('dropZone'); if (dz) dz.classList.remove('drag-over'); }
+        function handleFileDrop(e) {
+            e.preventDefault();
+            const dz = document.getElementById('dropZone'); if (dz) dz.classList.remove('drag-over');
+            const files = (e.dataTransfer && e.dataTransfer.files) ? e.dataTransfer.files : [];
+            if (files && files.length) processFiles(files);
+        }
+        function handleFileSelection(e) {
+            const files = (e.target && e.target.files) ? e.target.files : [];
+            if (files && files.length) processFiles(files);
+            try { e.target.value = ''; } catch(_) { /* ignore */ }
+        }
+        
+        // Upload flow
+        function addQueueItem(filename) {
+            const q = document.getElementById('uploadQueue');
+            if (!q) return null;
+            const id = 'upl_' + Math.random().toString(36).slice(2);
+            const el = document.createElement('div');
+            el.className = 'upload-item';
+            el.id = id;
+            el.innerHTML = `<div>${filename}</div><div class="upload-progress"><div class="progress-bar"><div class="progress-fill" style="width: 5%"></div></div></div><div class="status">Queued</div>`;
+            q.appendChild(el);
+            return id;
+        }
+        function setQueueItemStatus(id, status, pct) {
+            const el = id && document.getElementById(id);
+            if (!el) return;
+            const fill = el.querySelector('.progress-fill');
+            if (fill && typeof pct === 'number') fill.style.width = Math.max(0, Math.min(100, pct)) + '%';
+            const s = el.querySelector('.status');
+            if (s) s.textContent = status;
+        }
+        async function readFileAsBase64(file) {
+            return new Promise((resolve, reject) => {
+                try {
+                    const fr = new FileReader();
+                    fr.onload = () => {
+                        try {
+                            const res = String(fr.result || '');
+                            const idx = res.indexOf(',');
+                            resolve(idx >= 0 ? res.slice(idx + 1) : res);
+                        } catch (e) { reject(e); }
+                    };
+                    fr.onerror = reject;
+                    fr.readAsDataURL(file);
+                } catch (e) { reject(e); }
+            });
+        }
+        async function uploadFilesSequential(files, pass) {
+            let okCount = 0, failCount = 0;
+            for (let i = 0; i < files.length; i++) {
+                const f = files[i];
+                const id = addQueueItem(f.name);
+                try {
+                    setQueueItemStatus(id, 'Encoding…', 10);
+                    const b64 = await readFileAsBase64(f);
+                    setQueueItemStatus(id, 'Uploading…', 35);
+                    const url = getUploadBlobUrl();
+                    const resp = await fetch(url, {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                            'x-legal-admin-passcode': pass
+                        },
+                        body: JSON.stringify({ filename: f.name, file_data: b64 })
+                    });
+                    if (resp.status === 401) {
+                        setQueueItemStatus(id, 'Unauthorized – update passcode', 100);
+                        const retry = confirm('Invalid passcode. Update passcode and retry remaining uploads?');
+                        if (retry) {
+                            promptForPasscode();
+                            const newPass = getStoredPasscode();
+                            if (!newPass) { showModalStatus('Upload aborted: no passcode set', 'error'); return; }
+                            const remaining = [f, ...files.slice(i + 1)];
+                            await uploadFilesSequential(remaining, newPass);
+                            return; // stop current loop; recursive call will handle rest
+                        } else {
+                            failCount++;
+                            continue;
+                        }
+                    }
+                    if (!resp.ok) {
+                        const t = await resp.text();
+                        throw new Error(t || ('HTTP ' + resp.status));
+                    }
+                    await resp.json().catch(() => ({}));
+                    setQueueItemStatus(id, 'Uploaded', 100);
+                    okCount++;
+                } catch (e) {
+                    console.error('Upload failed', e);
+                    setQueueItemStatus(id, 'Failed', 100);
+                    failCount++;
+                }
+            }
+            if (okCount && !failCount) {
+                showModalStatus(`Successfully uploaded ${okCount} file(s)`, 'success');
+            } else if (okCount && failCount) {
+                showModalStatus(`Uploaded ${okCount} file(s); ${failCount} failed`, 'info');
+            } else {
+                showModalStatus('All uploads failed', 'error');
+            }
+        }
+        function processFiles(fileList) {
+            const files = Array.from(fileList || []);
+            if (!files.length) return;
+            const invalid = files.filter(f => !/\.docx$/i.test(f.name));
+            if (invalid.length) { alert('Only .docx files are allowed.'); return; }
+            const badName = files.filter(f => !validateFilename(f.name));
+            if (badName.length) { alert('Invalid filename(s). Use ISO 3166-1 alpha-2 like DE.docx'); return; }
+            const isoList = files.map(f => f.name.slice(0, 2).toUpperCase());
+            const msg = `Overwrite warning:\n\nUploading will REPLACE existing content for: ${isoList.join(', ')} in storage and search index.\n\nProceed?`;
+            if (!confirm(msg)) return;
+            const pass = ensurePasscode();
+            if (!pass) { alert('Upload cancelled: Admin passcode required.'); return; }
+            uploadFilesSequential(files, pass);
         }
     </script>
 </body>
