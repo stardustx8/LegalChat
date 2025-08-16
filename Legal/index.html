@@ -146,49 +146,21 @@
             display: none;
         }
         
-        /* Document Management Trigger */
-        .document-management-trigger {
-            margin-top: 20px;
-            text-align: center;
-        }
-        
-        /* Admin link styling */
+        /* Admin link - low contrast as requested */
         .admin-link {
             position: fixed;
-            bottom: 20px;
-            right: 20px;
-            background: #007bff;
-            color: white;
-            padding: 10px 20px;
-            border-radius: 5px;
+            bottom: 10px;
+            right: 10px;
+            color: #999;
+            font-size: 12px;
             text-decoration: none;
-            font-weight: 600;
             cursor: pointer;
             z-index: 100;
-            box-shadow: 0 2px 8px rgba(0,0,0,0.2);
         }
         
         .admin-link:hover {
-            background: #0056b3;
-        }
-        
-        .doc-mgmt-btn {
-            background: #007bff;
-            color: white;
-            border: none;
-            padding: 12px 24px;
-            border-radius: 8px;
-            cursor: pointer;
-            font-size: 16px;
-            font-weight: 500;
-            transition: all 0.2s;
-            box-shadow: 0 2px 4px rgba(0,123,255,0.2);
-        }
-        
-        .doc-mgmt-btn:hover {
-            background: #0056b3;
-            transform: translateY(-1px);
-            box-shadow: 0 4px 8px rgba(0,123,255,0.3);
+            color: #666;
+            text-decoration: underline;
         }
         
         /* Modal Styles */
@@ -200,8 +172,63 @@
             top: 0;
             width: 100%;
             height: 100%;
-            background-color: rgba(0,0,0,0.5);
-            backdrop-filter: blur(4px);
+            overflow: auto;
+            background-color: rgba(0,0,0,0.4);
+        }
+        
+        .modal-content {
+            background-color: #fefefe;
+            margin: 5% auto;
+            padding: 0;
+            border: 1px solid #888;
+            width: 90%;
+            max-width: 800px;
+            border-radius: 12px;
+            animation: slideDown 0.3s ease-out;
+        }
+        
+        .modal-footer {
+            background: #f8f9fa;
+            padding: 20px 30px;
+            border-radius: 0 0 12px 12px;
+            text-align: right;
+            border-top: 1px solid #dee2e6;
+        }
+        
+        /* Admin Upload Modal Styles */
+        .admin-modal {
+            display: none;
+            position: fixed;
+            z-index: 1000;
+            left: 0;
+            top: 0;
+            width: 100%;
+            height: 100%;
+            overflow: auto;
+            background-color: rgba(0,0,0,0.4);
+        }
+        
+        .admin-modal-content {
+            background-color: #fefefe;
+            margin: 10% auto;
+            padding: 30px;
+            border: 1px solid #888;
+            width: 90%;
+            max-width: 600px;
+            border-radius: 8px;
+        }
+        
+        .admin-close {
+            color: #aaa;
+            float: right;
+            font-size: 28px;
+            font-weight: bold;
+            cursor: pointer;
+        }
+        
+        .admin-close:hover,
+        .admin-close:focus {
+            color: black;
         }
         
         .modal-content {
@@ -596,18 +623,25 @@
             border: 1px solid #bee5eb;
         }
 
-                /* Updated Document Management Styles */
-                .section-header {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            margin-bottom: 20px;
+        /* Upload area styles */
+        .upload-dropzone {
+            border: 2px dashed #ccc;
+            border-radius: 8px;
+            padding: 40px;
+            text-align: center;
+            cursor: pointer;
+            transition: all 0.3s;
+            margin: 20px 0;
         }
         
-        .header-left {
-            display: flex;
-            align-items: center;
-            gap: 20px;
+        .upload-dropzone:hover {
+            border-color: #007bff;
+            background: #f0f8ff;
+        }
+        
+        .upload-dropzone.dragover {
+            border-color: #28a745;
+            background: #e8f5e9;
         }
         
         .select-all-container {
@@ -816,7 +850,7 @@
         /* Print: show only the answer content */
         @media print {
             body { background: #fff; }
-            .document-management-trigger, #query-progress, details, textarea, #askButton, h1, #country-header-container, hr { display: none !important; }
+            .admin-link, #query-progress, details, textarea, #askButton, h1, #country-header-container, hr { display: none !important; }
             #refined-answer-container { color: #000; }
         }
 
@@ -857,66 +891,42 @@
         <button id="askButton">Ask!</button>
         <div id="aria-live-status" class="sr-only" aria-live="polite"></div>
         
-        <!-- Admin Link (bottom right) -->
-        <a href="#" class="admin-link" onclick="openDocumentManagement(); return false;">Admin</a>
+        <!-- Admin Link (low-contrast, bottom right) -->
+        <a href="#" class="admin-link" onclick="openAdminUpload(); return false;">Admin</a>
         
-        <!-- Document Management Button (alternative access) -->
-        <div class="document-management-trigger">
-            <button id="openDocMgmtBtn" onclick="openDocumentManagement()" class="doc-mgmt-btn">
-                📁 Manage Documents
-            </button>
-        </div>
-        
-        <!-- Document Management Modal -->
-        <div id="documentManagementModal" class="modal">
-            <div class="modal-content">
-                <div class="modal-header">
-                    <h2>Document Management</h2>
-                    <span class="close">&times;</span>
+        <!-- Admin Upload Modal -->
+        <div id="adminUploadModal" class="admin-modal">
+            <div class="admin-modal-content">
+                <span class="admin-close" onclick="closeAdminUpload()">&times;</span>
+                <h2>Admin Upload</h2>
+                
+                <!-- Passcode Gate -->
+                <div id="passcodeGate" style="display: block;">
+                    <p>Enter admin passcode to continue:</p>
+                    <input type="password" id="adminPasscode" placeholder="Passcode" style="width: 200px; padding: 8px; margin: 10px 0;">
+                    <button onclick="verifyPasscode()" style="padding: 8px 16px; margin-left: 10px;">Verify</button>
                 </div>
-                <div class="modal-body">
-                    <!-- Available Documents Section -->
-                    <div class="doc-section">
-                        <div class="section-header">
-                            <div class="header-left">
-                                <h3>📄 Available Documents</h3>
-                                <label class="select-all-container">
-                                    <input type="checkbox" id="selectAllCheckbox" class="select-all-checkbox">
-                                    <span class="select-all-label">Select All</span>
-                                </label>
-                            </div>
-                            <button id="refreshDocumentsBtn" class="refresh-btn">🔄 Refresh</button>
-                        </div>
-                        <div id="documentList" class="document-list">
-                            <div class="loading-message">Loading documents...</div>
-                        </div>
-                        <div class="delete-controls">
-                            <button id="deleteSelectedBtn" class="delete-btn" disabled>🗑️ Delete Selected Documents</button>
-                        </div>
+                
+                <!-- Upload Interface (hidden until passcode verified) -->
+                <div id="uploadInterface" style="display: none;">
+                    <h3>Upload Legal Documents</h3>
+                    <div id="dropZone" ondrop="handleAdminFileDrop(event)" ondragover="handleAdminDragOver(event)" ondragleave="handleAdminDragLeave(event)" style="border: 2px dashed #ccc; border-radius: 8px; padding: 40px; text-align: center; margin: 20px 0; background: #f9f9f9;">
+                        <p>📁 Drag & drop .docx files here or</p>
+                        <input type="file" id="fileInput" accept=".docx" multiple onchange="handleAdminFileSelection(event)" style="display: none;">
+                        <button onclick="document.getElementById('fileInput').click()" style="padding: 8px 16px; background: #007bff; color: white; border: none; border-radius: 5px; cursor: pointer;">Browse Files</button>
+                    </div>
+                    <div style="background: #fff3cd; padding: 10px; border-radius: 5px; margin: 20px 0;">
+                        <p style="margin: 5px 0;"><strong>⚠️ Important:</strong></p>
+                        <ul style="margin: 5px 0; padding-left: 20px;">
+                            <li>Existing data for these files will be <strong>overwritten</strong></li>
+                            <li>Changes may take ~15 minutes to propagate</li>
+                            <li style="color: #666; font-size: 0.9em;">Permanent deletion requires an IT ServiceNow ticket</li>
+                        </ul>
                     </div>
                     
-                    <!-- Upload New Documents Section -->
-                    <div class="doc-section upload-section">
-                        <h3>📤 Upload New Documents</h3>
-                        <div class="upload-guidance">
-                            <p><strong>Filename Requirements:</strong> Files must be named with valid ISO 3166-1 alpha-2 country codes (e.g., DE.docx, FR.docx, CH.docx)</p>
-                            <p><strong>Note:</strong> Uploading a file with an existing country code will replace the current document for that country and overwrite its indexed content.</p>
-                            <p><strong>Security:</strong> Admin passcode required to upload. <button id="setPasscodeBtn" class="link-btn" type="button">Set/Change passcode</button></p>
-                        </div>
-                        <div class="upload-area">
-                            <input type="file" id="fileInput" accept=".docx" multiple style="display: none;">
-                            <div id="dropZone" class="drop-zone">
-                                <div class="drop-zone-content">
-                                    <div class="drop-icon">📁</div>
-                                    <p><strong>Drop .docx files here</strong> or <button id="browseBtn" class="link-btn">browse files</button></p>
-                                </div>
-                            </div>
-                            <div id="uploadQueue" class="upload-queue"></div>
-                        </div>
-                    </div>
+                    <button id="uploadBtn" onclick="uploadFiles()" style="display: none; padding: 10px 20px; background: #28a745; color: white; border: none; border-radius: 5px; cursor: pointer;">Upload Files</button>
                     
-                    <!-- Status Messages -->
-                    <div id="modalStatus" class="status-message"></div>
+                    <div id="uploadStatus" style="margin-top: 20px;"></div>
                 </div>
             </div>
         </div>
@@ -986,126 +996,106 @@
         let documentStatus = [];
         let selectedDocuments = new Set();
         
-        // Global functions - accessible from onclick handlers
-                // Updated Document Management Functions
-                function openDocumentManagement() {
-            console.log('DEBUG: Opening document management modal');
-            const modal = document.getElementById('documentManagementModal');
-            console.log('DEBUG: Modal element found:', modal);
-            
-            if (!modal) {
-                console.error('ERROR: Document management modal not found');
-                alert('Error: Document management modal not found. Please refresh the page.');
-                return;
-            }
-            
-            console.log('DEBUG: Setting modal display to block');
+        // Admin Upload Functions
+        let selectedFiles = [];
+        const PASSCODE_KEY = 'legal_admin_passcode';
+        
+        function openAdminUpload() {
+            const modal = document.getElementById('adminUploadModal');
             modal.style.display = 'block';
             
-            // Load available documents
-            loadAvailableDocuments();
-        }
-        
-        function closeDocumentManagement() {
-            const modal = document.getElementById('documentManagementModal');
-            if (modal) {
-                modal.style.display = 'none';
+            // Check if passcode was already verified in session
+            const storedPass = sessionStorage.getItem(PASSCODE_KEY);
+            if (storedPass) {
+                document.getElementById('passcodeGate').style.display = 'none';
+                document.getElementById('uploadInterface').style.display = 'block';
             }
         }
         
-        async function loadAvailableDocuments() {
-            console.log('DEBUG: Loading available documents');
-            const documentList = document.getElementById('documentList');
-            const selectAllCheckbox = document.getElementById('selectAllCheckbox');
+        function closeAdminUpload() {
+            const modal = document.getElementById('adminUploadModal');
+            modal.style.display = 'none';
+            // Clear file list
+            selectedFiles = [];
+            document.getElementById('fileInput').value = '';
+            document.getElementById('fileList').innerHTML = '';
+            document.getElementById('uploadBtn').style.display = 'none';
+            document.getElementById('uploadStatus').innerHTML = '';
+        }
+        
+        function verifyPasscode() {
+            const passcode = document.getElementById('adminPasscode').value;
+            if (passcode) {
+                sessionStorage.setItem(PASSCODE_KEY, passcode);
+                document.getElementById('passcodeGate').style.display = 'none';
+                document.getElementById('uploadInterface').style.display = 'block';
+            }
+        }
+        
+        async function uploadFiles() {
+            const statusDiv = document.getElementById('uploadStatus');
+            const passcode = sessionStorage.getItem(PASSCODE_KEY);
             
-            if (!documentList) {
-                console.error('ERROR: Document list element not found');
+            if (!passcode) {
+                alert('Please enter passcode first');
                 return;
             }
             
-            // Show loading state
-            documentList.innerHTML = '<div class="loading-message">Loading documents...</div>';
+            // Confirm overwrite
+            const countries = selectedFiles.map(f => f.name.replace('.docx', '').toUpperCase());
+            const msg = `Warning: This will OVERWRITE existing content for:\n\n${countries.join(', ')}\n\nChanges may take ~15 minutes to propagate. Continue?`;
+            if (!confirm(msg)) return;
             
-            try {
-                // For now, use mock data - replace with actual API call
-                const documents = await fetchAvailableDocuments();
+            // Upload files sequentially
+            statusDiv.innerHTML = '';
+            for (let i = 0; i < selectedFiles.length; i++) {
+                const file = selectedFiles[i];
+                const fileStatus = document.createElement('div');
+                fileStatus.id = `status-${i}`;
+                fileStatus.innerHTML = `📄 ${file.name}: <span style="color: orange;">Uploading...</span>`;
+                statusDiv.appendChild(fileStatus);
                 
-                if (documents.length === 0) {
-                    documentList.innerHTML = `
-                        <div class="empty-state">
-                            <div class="empty-state-icon">📄</div>
-                            <p>No documents available</p>
-                            <p style="font-size: 14px; color: #6c757d;">Upload your first document using the section below.</p>
-                        </div>
-                    `;
-                    selectAllCheckbox.style.display = 'none';
-                    return;
+                try {
+                    const base64 = await fileToBase64(file);
+                    const response = await fetch('/api/upload_blob', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                            'x-legal-admin-passcode': passcode
+                        },
+                        body: JSON.stringify({
+                            filename: file.name,
+                            file_data: base64
+                        })
+                    });
+                    
+                    if (response.ok) {
+                        fileStatus.innerHTML = `📄 ${file.name}: <span style="color: green;">✅ Indexed</span>`;
+                    } else {
+                        const error = await response.text();
+                        fileStatus.innerHTML = `📄 ${file.name}: <span style="color: red;">❌ Failed (${error})</span>`;
+                    }
+                } catch (err) {
+                    fileStatus.innerHTML = `📄 ${file.name}: <span style="color: red;">❌ Error: ${err.message}</span>`;
                 }
-                
-                // Show select all checkbox
-                selectAllCheckbox.style.display = 'inline-block';
-                
-                // Render document list
-                documentList.innerHTML = documents.map(doc => `
-                    <div class="document-item" data-iso="${doc.iso_code}">
-                        <input type="checkbox" class="doc-checkbox" data-iso="${doc.iso_code}">
-                        <div class="doc-info">
-                            <div class="doc-details">
-                                <div class="doc-filename">${doc.filename}</div>
-                                <div class="doc-country-name">${doc.country_name}</div>
-                            </div>
-                            <div class="doc-status-badge status-${doc.status}">
-                                ${doc.status === 'available' ? '✓ Available' : 
-                                  doc.status === 'processing' ? '⏳ Processing' : 
-                                  '⚠️ Error'}
-                            </div>
-                        </div>
-                    </div>
-                `).join('');
-                
-                // Add event listeners for checkboxes
-                setupDocumentCheckboxes();
-                
-            } catch (error) {
-                console.error('ERROR: Failed to load documents:', error);
-                documentList.innerHTML = `
-                    <div class="empty-state">
-                        <div class="empty-state-icon">⚠️</div>
-                        <p>Failed to load documents</p>
-                        <p style="font-size: 14px; color: #6c757d;">Please try refreshing or contact support.</p>
-                    </div>
-                `;
             }
+            
+            // Clear selection after upload
+            setTimeout(() => {
+                selectedFiles = [];
+                document.getElementById('fileInput').value = '';
+                document.getElementById('fileList').innerHTML = '';
+                document.getElementById('uploadBtn').style.display = 'none';
+            }, 3000);
         }
         
-        async function fetchAvailableDocuments() {
-            // Mock data for now - replace with actual API call
-            // return await fetch('/api/documents').then(r => r.json());
-            
-            // Mock response for testing
-            return [
-                {
-                    iso_code: 'DE',
-                    filename: 'DE.docx',
-                    country_name: 'Germany',
-                    status: 'available',
-                    last_modified: '2024-01-15T10:30:00Z'
-                },
-                {
-                    iso_code: 'FR',
-                    filename: 'FR.docx',
-                    country_name: 'France',
-                    status: 'available',
-                    last_modified: '2024-01-14T15:45:00Z'
-                },
-                {
-                    iso_code: 'CH',
-                    filename: 'CH.docx',
-                    country_name: 'Switzerland',
-                    status: 'processing',
-                    last_modified: '2024-01-16T09:15:00Z'
-                }
-            ];
+        function fileToBase64(file) {
+            return new Promise((resolve, reject) => {
+                const reader = new FileReader();
+                reader.onload = () => resolve(reader.result.split(',')[1]);
+                reader.onerror = reject;
+                reader.readAsDataURL(file);
+            });
         }
         
         function setupDocumentCheckboxes() {
@@ -1172,42 +1162,6 @@
             }
         }
         
-        async function deleteSelectedDocuments() {
-            const checkedBoxes = document.querySelectorAll('.doc-checkbox:checked');
-            
-            if (checkedBoxes.length === 0) {
-                return;
-            }
-            
-            const selectedCountries = Array.from(checkedBoxes).map(cb => cb.dataset.iso);
-            const confirmMessage = `Are you sure you want to delete ${selectedCountries.length} document(s)?\n\nCountries: ${selectedCountries.join(', ')}\n\nThis action cannot be undone.`;
-            
-            if (!confirm(confirmMessage)) {
-                return;
-            }
-            
-            try {
-                showModalStatus('Deleting selected documents...', 'info');
-                
-                // Mock deletion - replace with actual API calls
-                for (const isoCode of selectedCountries) {
-                    console.log(`DEBUG: Deleting document for ${isoCode}`);
-                    // await deleteDocument(isoCode);
-                }
-                
-                showModalStatus(`Successfully deleted ${selectedCountries.length} document(s)`, 'success');
-                
-                // Reload the document list
-                setTimeout(() => {
-                    loadAvailableDocuments();
-                }, 1000);
-                
-            } catch (error) {
-                console.error('ERROR: Failed to delete documents:', error);
-                showModalStatus('Failed to delete selected documents. Please try again.', 'error');
-            }
-        }
-        
         function validateFilename(filename) {
             // ISO 3166-1 alpha-2 country codes pattern
             const isoPattern = /^[A-Z]{2}\.docx$/i;
@@ -1227,54 +1181,10 @@
                 'BE': 'Belgium',
                 'LU': 'Luxembourg',
                 'GB': 'United Kingdom',
-                'US': 'United States',
+                'US': 'United States'
                 // Add more as needed
             };
-            
-            return countryNames[isoCode.toUpperCase()] || `Country (${isoCode.toUpperCase()})`;
-        }
-        
-        function showModalStatus(message, type = 'info') {
-            const statusEl = document.getElementById('modalStatus');
-            
-            if (!statusEl) {
-                console.error('ERROR: modalStatus element not found');
-                return;
-            }
-            
-            statusEl.textContent = message;
-            statusEl.className = `status-message status-${type}`;
-            statusEl.style.display = 'block';
-            
-            // Auto-hide success/info messages after 3 seconds
-            if (type === 'success' || type === 'info') {
-                setTimeout(() => {
-                    statusEl.style.display = 'none';
-                }, 3000);
-            }
-        }
-        
-        // Lightweight fetch with a single retry for transient backend failures (5xx) or network errors
-        async function fetchWithRetry(url, options = {}, retries = 1, backoffMs = 500) {
-            for (let attempt = 0; attempt <= retries; attempt++) {
-                try {
-                    const resp = await fetch(url, options);
-                    // Retry on transient server errors
-                    if (resp.status >= 500 && resp.status < 600) {
-                        if (attempt < retries) {
-                            await new Promise(r => setTimeout(r, backoffMs));
-                            continue;
-                        }
-                    }
-                    return resp;
-                } catch (err) {
-                    if (attempt < retries) {
-                        await new Promise(r => setTimeout(r, backoffMs));
-                        continue;
-                    }
-                    throw err;
-                }
-            }
+            return countryNames[isoCode] || isoCode;
         }
         
         // Initialize when DOM is ready
@@ -1862,10 +1772,70 @@
             const files = (e.dataTransfer && e.dataTransfer.files) ? e.dataTransfer.files : [];
             if (files && files.length) processFiles(files);
         }
-        function handleFileSelection(e) {
-            const files = (e.target && e.target.files) ? e.target.files : [];
-            if (files && files.length) processFiles(files);
-            try { e.target.value = ''; } catch(_) { /* ignore */ }
+        // Admin upload drag & drop handlers
+        function handleAdminDragOver(e) {
+            e.preventDefault();
+            const dz = document.getElementById('dropZone');
+            if (dz) dz.style.background = '#e9ecef';
+        }
+        
+        function handleAdminDragLeave(e) {
+            e.preventDefault();
+            const dz = document.getElementById('dropZone');
+            if (dz) dz.style.background = '#f9f9f9';
+        }
+        
+        function handleAdminFileDrop(e) {
+            e.preventDefault();
+            const dz = document.getElementById('dropZone');
+            if (dz) dz.style.background = '#f9f9f9';
+            const files = Array.from(e.dataTransfer.files || []);
+            processAdminFiles(files);
+        }
+        
+        function handleAdminFileSelection(e) {
+            const files = Array.from(e.target.files || []);
+            processAdminFiles(files);
+        }
+        
+        function processAdminFiles(files) {
+            // Filter for .docx files only
+            const docxFiles = files.filter(f => f.name.toLowerCase().endsWith('.docx'));
+            
+            if (docxFiles.length === 0) {
+                alert('Please select .docx files only');
+                return;
+            }
+            
+            // Validate country codes
+            const invalidFiles = docxFiles.filter(f => {
+                const name = f.name.replace('.docx', '').toUpperCase();
+                return !(/^[A-Z]{2}$/.test(name));
+            });
+            
+            if (invalidFiles.length > 0) {
+                alert(`Invalid filenames (must be 2-letter country codes):\n${invalidFiles.map(f => f.name).join(', ')}`);
+                return;
+            }
+            
+            selectedFiles = docxFiles;
+            updateFileList();
+        }
+        
+        function updateFileList() {
+            const listDiv = document.getElementById('fileList');
+            const uploadBtn = document.getElementById('uploadBtn');
+            
+            if (selectedFiles.length === 0) {
+                listDiv.innerHTML = '';
+                uploadBtn.style.display = 'none';
+                return;
+            }
+            
+            listDiv.innerHTML = '<strong>Selected files:</strong><ul>' + 
+                selectedFiles.map(f => `<li>${f.name}</li>`).join('') + 
+                '</ul>';
+            uploadBtn.style.display = 'block';
         }
         
         // Upload flow
