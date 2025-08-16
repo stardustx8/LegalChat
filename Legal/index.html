@@ -1024,16 +1024,28 @@
             document.getElementById('uploadStatus').innerHTML = '';
         }
         
-        function verifyPasscode() {
+        async function verifyPasscode() {
             const passcode = document.getElementById('adminPasscode').value;
-            // Only accept non-empty passcode (backend will validate actual value)
             if (!passcode || passcode.trim() === '') {
                 alert('Please enter a passcode');
                 return;
             }
+            
+            // Store passcode and show upload interface
+            // Note: Actual validation happens during upload
             sessionStorage.setItem(PASSCODE_KEY, passcode);
             document.getElementById('passcodeGate').style.display = 'none';
             document.getElementById('uploadInterface').style.display = 'block';
+            
+            // Show note about passcode validation
+            const noteDiv = document.createElement('div');
+            noteDiv.style.cssText = 'background: #d1ecf1; color: #0c5460; padding: 10px; border-radius: 5px; margin-bottom: 15px;';
+            noteDiv.innerHTML = '📝 Note: Passcode will be validated when you upload files.';
+            const uploadInterface = document.getElementById('uploadInterface');
+            if (uploadInterface.firstChild && !document.getElementById('passcode-note')) {
+                noteDiv.id = 'passcode-note';
+                uploadInterface.insertBefore(noteDiv, uploadInterface.children[1]);
+            }
         }
         
         async function uploadFiles() {
@@ -1066,6 +1078,10 @@
                     const uploadUrl = window.UPLOAD_BLOB_URL || 
                                      (window.LEGALDOCS_PROCESSOR_BASE_URL ? window.LEGALDOCS_PROCESSOR_BASE_URL + '/api/upload_blob' : '/api/upload_blob');
                     
+                    console.log('Uploading to:', uploadUrl);
+                    console.log('Filename:', file.name);
+                    console.log('Passcode length:', passcode.length);
+                    
                     const response = await fetch(uploadUrl, {
                         method: 'POST',
                         headers: {
@@ -1081,11 +1097,47 @@
                     if (response.ok) {
                         fileStatus.innerHTML = `📄 ${file.name}: <span style="color: green;">✅ Indexed</span>`;
                     } else {
-                        const error = await response.text();
-                        fileStatus.innerHTML = `📄 ${file.name}: <span style="color: red;">❌ Failed (${error})</span>`;
+                        let errorMsg = '';
+                        try {
+                            const errorText = await response.text();
+                            if (errorText) {
+                                try {
+                                    const errorJson = JSON.parse(errorText);
+                                    errorMsg = errorJson.message || errorJson.error || errorText;
+                                } catch {
+                                    errorMsg = errorText;
+                                }
+                            } else {
+                                errorMsg = `HTTP ${response.status}: ${response.statusText}`;
+                            }
+                        } catch (e) {
+                            console.error('Error parsing response:', e);
+                            errorMsg = `HTTP ${response.status}`;
+                        }
+                        
+                        // Special handling for common errors
+                        if (response.status === 401) {
+                            errorMsg = 'Invalid passcode';
+                            // Clear passcode and show gate again
+                            sessionStorage.removeItem(PASSCODE_KEY);
+                            alert('Invalid passcode. Please enter the correct admin passcode.');
+                            document.getElementById('passcodeGate').style.display = 'block';
+                            document.getElementById('uploadInterface').style.display = 'none';
+                            document.getElementById('adminPasscode').value = '';
+                            return;
+                        } else if (response.status === 404) {
+                            errorMsg = 'Upload endpoint not found - check Azure Function App URL';
+                        }
+                        
+                        fileStatus.innerHTML = `📄 ${file.name}: <span style="color: red;">❌ Failed: ${errorMsg}</span>`;
                     }
                 } catch (err) {
-                    fileStatus.innerHTML = `📄 ${file.name}: <span style="color: red;">❌ Error: ${err.message}</span>`;
+                    console.error('Upload error:', err);
+                    let errorMsg = err.message || 'Unknown error';
+                    if (errorMsg.includes('Failed to fetch') || errorMsg.includes('NetworkError')) {
+                        errorMsg = 'Network error - check if Azure Function App is running and CORS is configured';
+                    }
+                    fileStatus.innerHTML = `📄 ${file.name}: <span style="color: red;">❌ Error: ${errorMsg}</span>`;
                 }
             }
             
