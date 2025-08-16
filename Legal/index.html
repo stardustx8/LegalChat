@@ -995,6 +995,14 @@
     </div>
 
     <script>
+        // Configuration
+        const azureSearchEndpoint = "https://legaldocs-search.search.windows.net";
+        const azureSearchApiKey = "nq3Nn1MhSWdXCQdpqP1eADOA4NNrJDLQGfaWGNgJCuAzSeAqBMTX";
+        
+        // Configure the Azure Function App URL for uploads
+        // Set this to your Azure Function App URL, e.g., 'https://your-function-app.azurewebsites.net'
+        window.LEGALDOCS_PROCESSOR_BASE_URL = 'https://legaldocs-processor.azurewebsites.net';
+        
         // Global variables for document management
         let documentStatus = [];
         let selectedDocuments = new Set();
@@ -1098,24 +1106,8 @@
                         fileStatus.innerHTML = `📄 ${file.name}: <span style="color: green;">✅ Indexed</span>`;
                     } else {
                         let errorMsg = '';
-                        try {
-                            const errorText = await response.text();
-                            if (errorText) {
-                                try {
-                                    const errorJson = JSON.parse(errorText);
-                                    errorMsg = errorJson.message || errorJson.error || errorText;
-                                } catch {
-                                    errorMsg = errorText;
-                                }
-                            } else {
-                                errorMsg = `HTTP ${response.status}: ${response.statusText}`;
-                            }
-                        } catch (e) {
-                            console.error('Error parsing response:', e);
-                            errorMsg = `HTTP ${response.status}`;
-                        }
                         
-                        // Special handling for common errors
+                        // Special handling for common HTTP status codes
                         if (response.status === 401) {
                             errorMsg = 'Invalid passcode';
                             // Clear passcode and show gate again
@@ -1124,9 +1116,34 @@
                             document.getElementById('passcodeGate').style.display = 'block';
                             document.getElementById('uploadInterface').style.display = 'none';
                             document.getElementById('adminPasscode').value = '';
+                            document.getElementById('passcode-note')?.remove();
+                            fileStatus.innerHTML = `📄 ${file.name}: <span style="color: red;">❌ Failed: Invalid passcode</span>`;
                             return;
                         } else if (response.status === 404) {
                             errorMsg = 'Upload endpoint not found - check Azure Function App URL';
+                        } else if (response.status === 400) {
+                            errorMsg = 'Bad request - check file format';
+                        } else if (response.status === 500) {
+                            errorMsg = 'Server error - check Azure Function logs';
+                        } else {
+                            errorMsg = `HTTP ${response.status}`;
+                        }
+                        
+                        // Try to get more details from response
+                        try {
+                            const errorText = await response.text();
+                            if (errorText) {
+                                try {
+                                    const errorJson = JSON.parse(errorText);
+                                    errorMsg = errorJson.message || errorJson.error || errorMsg;
+                                } catch {
+                                    if (errorText.length < 200) {
+                                        errorMsg = errorText;
+                                    }
+                                }
+                            }
+                        } catch (e) {
+                            console.error('Error parsing response:', e);
                         }
                         
                         fileStatus.innerHTML = `📄 ${file.name}: <span style="color: red;">❌ Failed: ${errorMsg}</span>`;
