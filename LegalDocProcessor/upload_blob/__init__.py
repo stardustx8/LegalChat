@@ -9,17 +9,17 @@ def main(req: func.HttpRequest) -> func.HttpResponse:
     logging.info('Upload blob function processed a request.')
     
     try:
-        # Parse request body
+        # Parse JSON body
         req_body = req.get_json()
+        
         if not req_body:
             return func.HttpResponse(
-                json.dumps({"success": False, "message": "No JSON body provided"}),
+                json.dumps({"error": "Request body is required"}),
                 status_code=400,
                 mimetype="application/json"
             )
         
-        # Extract parameters
-        container = req_body.get('container', 'legaldocsrag')
+        # Extract required fields
         filename = req_body.get('filename')
         file_data = req_body.get('file_data')  # Base64 encoded file content
         
@@ -52,11 +52,15 @@ def main(req: func.HttpRequest) -> func.HttpResponse:
         
         # Initialize blob service client
         blob_service_client = BlobServiceClient.from_connection_string(connection_string)
-        blob_client = blob_service_client.get_blob_client(container=container, blob=filename)
+        container_name = req_body.get('container', 'legaldocsrag')
+        blob_client = blob_service_client.get_blob_client(
+            container=container_name,
+            blob=filename
+        )
         
         # Decode base64 file data
         try:
-            file_bytes = base64.b64decode(file_data)
+            decoded_data = base64.b64decode(file_data)
         except Exception as e:
             return func.HttpResponse(
                 json.dumps({"success": False, "message": f"Invalid base64 file data: {str(e)}"}),
@@ -64,18 +68,21 @@ def main(req: func.HttpRequest) -> func.HttpResponse:
                 mimetype="application/json"
             )
         
-        # Upload blob (this will overwrite if exists - perfect for replace functionality)
-        blob_client.upload_blob(file_bytes, overwrite=True)
+        # Upload the blob (caption/OCR always enabled)
+        blob_client.upload_blob(
+            decoded_data,
+            overwrite=True
+        )
         
-        logging.info(f"Successfully uploaded {filename} to container {container}")
+        logging.info(f"Successfully uploaded {filename} to container {container_name}")
+        
+        # Extract ISO code from filename (first 2 characters)
+        iso_code = filename[:2]
         
         return func.HttpResponse(
             json.dumps({
-                "success": True,
-                "message": f"Successfully uploaded {filename}",
-                "filename": filename,
-                "container": container,
-                "size_bytes": len(file_bytes)
+                "message": f"File {filename} uploaded successfully",
+                "iso_code": iso_code
             }),
             status_code=200,
             mimetype="application/json"
