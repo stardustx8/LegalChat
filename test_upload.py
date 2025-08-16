@@ -3,6 +3,7 @@ import requests
 import base64
 import json
 import sys
+import os
 
 # Create a simple test DOCX file content (minimal DOCX structure)
 # This is a minimal valid DOCX file
@@ -21,12 +22,18 @@ payload = {
 # Function App URL
 url = "https://legaldocs-processor-djefd2eygvcugdgz.westeurope-01.azurewebsites.net/api/upload_blob"
 
+# Optional admin passcode: CLI arg takes precedence, then env LEGAL_UPLOAD_PASSWORD
+passcode = sys.argv[1] if len(sys.argv) > 1 else os.environ.get("LEGAL_UPLOAD_PASSWORD", "")
+headers = {"Content-Type": "application/json"}
+if passcode:
+    headers["x-legal-admin-passcode"] = passcode
+
 try:
     print(f"Uploading to: {url}")
     print(f"Payload size: {len(json.dumps(payload))} bytes")
 
     # Send the request
-    response = requests.post(url, json=payload, timeout=30)
+    response = requests.post(url, json=payload, headers=headers, timeout=30)
 
     print(f"Status Code: {response.status_code}")
     print(f"Response: {response.text}")
