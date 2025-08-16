@@ -6,7 +6,7 @@ import json
 import sys
 
 # Configuration
-FUNCTION_APP_URL = "https://legaldocs-processor.azurewebsites.net"
+FUNCTION_APP_URL = "https://legaldocs-processor-djefd2eygvcugdgz.westeurope-01.azurewebsites.net"
 UPLOAD_ENDPOINT = f"{FUNCTION_APP_URL}/api/upload_blob"
 
 print("Testing Azure Function App Connection")
@@ -44,7 +44,7 @@ headers = {
     "Content-Type": "application/json"
 }
 data = {
-    "filename": "TEST.docx",
+    "filename": "CL.docx",  # Valid format XX.docx
     "file_data": "dGVzdA=="  # base64 "test"
 }
 
@@ -91,9 +91,41 @@ except Exception as e:
     print(f"  ✗ Error: {e}")
 
 print()
+
+# Test 4: With correct passcode
+print("Test 4: With correct passcode (Vx99)")
+headers = {
+    "x-legal-admin-passcode": "Vx99",
+    "Content-Type": "application/json"
+}
+data = {
+    "filename": "CL.docx",
+    "file_data": "dGVzdA=="  # base64 "test"
+}
+
+try:
+    response = requests.post(UPLOAD_ENDPOINT, 
+                            headers=headers, 
+                            json=data,
+                            timeout=10)
+    print(f"  Status Code: {response.status_code}")
+    print(f"  Response: {response.text[:500] if response.text else '(empty)'}")
+    
+    if response.status_code == 200:
+        print("  ✓ Upload successful!")
+    elif response.status_code == 401:
+        print("  ✗ Passcode still rejected")
+    elif response.status_code == 500:
+        print("  ✗ Server error - check Azure Function logs")
+        print("  Likely missing KNIFE_STORAGE_CONNECTION_STRING in Azure config")
+except Exception as e:
+    print(f"  ✗ Error: {e}")
+
+print()
 print("=" * 50)
 print("Next steps:")
 print("1. If connection failed: Check Function App is deployed and running")
 print("2. If CORS not configured: Add your frontend URL to CORS settings in Azure Portal")
 print("3. If passcode rejected: Set LEGAL_UPLOAD_PASSWORD in Function App Configuration")
-print("4. Check Function App logs in Azure Portal for detailed error messages")
+print("4. If 500 error: Check KNIFE_STORAGE_CONNECTION_STRING is set in Function App Configuration")
+print("5. Check Function App logs in Azure Portal for detailed error messages")
